@@ -40,6 +40,8 @@ pub enum Value {
     Channel(u64), // channel ID
     Vector(Vec<f64>), // 1D vector
     Matrix(Vec<Vec<f64>>), // 2D matrix
+    Grid(Vec<Vec<Value>>), // 2D grid with neighbor logic
+    GridNeighbors(Box<Value>), // callable: grid.neighbors(i, j) -> list of adjacent cell values
     Enum {
         name: String,
         variants: HashMap<String, Value>,
@@ -61,6 +63,8 @@ pub enum Value {
         class_name: String,
         fields: HashMap<String, Value>,
     },
+    /// Constructor function for Class.new() - creates instances
+    Constructor(String), // class name
     None,
 }
 
@@ -109,6 +113,8 @@ impl fmt::Display for Value {
             Value::EnumVariant { variant_name, .. } => write!(f, "{}", variant_name),
             Value::Class { name, .. } => write!(f, "<class {}>", name),
             Value::Instance { class_name, .. } => write!(f, "<{} instance>", class_name),
+            Value::Constructor(class_name) => write!(f, "<constructor {}>", class_name),
+            Value::GridNeighbors(_) => write!(f, "<grid.neighbors>"),
             Value::Infinity(positive) => {
                 if *positive {
                     write!(f, "inf")
@@ -144,6 +150,19 @@ impl fmt::Display for Value {
             Value::Matrix(mat) => {
                 write!(f, "mat[")?;
                 for (i, row) in mat.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "[")?;
+                    for (j, item) in row.iter().enumerate() {
+                        if j > 0 { write!(f, ", ")?; }
+                        write!(f, "{}", item)?;
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, "]")
+            }
+            Value::Grid(grid) => {
+                write!(f, "grid[")?;
+                for (i, row) in grid.iter().enumerate() {
                     if i > 0 { write!(f, ", ")?; }
                     write!(f, "[")?;
                     for (j, item) in row.iter().enumerate() {
@@ -201,6 +220,7 @@ pub struct Interpreter {
     locals: Vec<HashMap<String, Value>>,
     statics: HashMap<String, Value>, // Static variables
     call_depth: usize, // Track recursion depth
+    defer_stack: Vec<Vec<AstNode>>, // Defer statements to run when block exits (LIFO)
 }
 
 impl Interpreter {
@@ -210,6 +230,7 @@ impl Interpreter {
             locals: Vec::new(),
             statics: HashMap::new(),
             call_depth: 0,
+            defer_stack: Vec::new(),
         };
         
         // Add built-in functions
@@ -235,7 +256,7 @@ impl Interpreter {
             // Call decorator with function as argument
             let mut call_args = vec![func];
             call_args.extend(args);
-            return self.call_function_internal(decorator_name, &call_args, &params, &*body);
+            return self.call_function_internal(decorator_name, &call_args, &params, &*body, None);
         }
         
         // Built-in decorators
@@ -277,7 +298,7 @@ impl Interpreter {
         Ok(func)
     }
     
-    fn call_function_internal(&mut self, _func_name: &str, args: &[Value], params: &[String], body: &AstNode) -> Result<Value, String> {
+    fn call_function_internal(&mut self, _func_name: &str, args: &[Value], params: &[String], body: &AstNode, this_value: Option<Value>) -> Result<Value, String> {
         // Check depth BEFORE incrementing to prevent stack overflow
         if self.call_depth >= 50 {
             return Err(JError::stack_overflow(self.call_depth).to_string());
@@ -287,6 +308,12 @@ impl Interpreter {
         
         // Push new scope
         self.locals.push(HashMap::new());
+        
+        // Bind this/self if method call
+        if let Some(ref this_val) = this_value {
+            self.locals.last_mut().unwrap().insert("this".to_string(), this_val.clone());
+            self.locals.last_mut().unwrap().insert("self".to_string(), this_val.clone());
+        }
         
         // Bind parameters
         for (i, param) in params.iter().enumerate() {
@@ -588,6 +615,29 @@ impl Interpreter {
                             _ => return Err("Graph must be initialized with a dictionary".to_string()),
                         }
                     }
+                    "grid" => {
+                        match val {
+                            Value::Grid(_) => val,
+                            Value::Matrix(rows) => {
+                                let grid: Vec<Vec<Value>> = rows
+                                    .into_iter()
+                                    .map(|row| row.into_iter().map(|f| Value::Float(f)).collect())
+                                    .collect();
+                                Value::Grid(grid)
+                            }
+                            Value::List(rows) => {
+                                let mut grid = Vec::new();
+                                for row in rows {
+                                    match row {
+                                        Value::List(cells) => grid.push(cells),
+                                        _ => return Err("Grid must be a list of lists (2D)".to_string()),
+                                    }
+                                }
+                                Value::Grid(grid)
+                            }
+                            _ => return Err("Grid must be initialized with a list of lists or matrix literal".to_string()),
+                        }
+                    }
                     "tree" => {
                         match val {
                             Value::Tree { .. } => val,
@@ -644,7 +694,7 @@ impl Interpreter {
                 Ok(enum_val)
             },
 
-            AstNode::ClassDeclaration { name, parent, traits, fields, methods, static_fields, static_methods } => {
+            AstNode::ClassDeclaration { name, parent, traits: _, fields, methods, static_fields, static_methods } => {
                 let mut class_fields = HashMap::new();
                 let mut class_methods = HashMap::new();
                 let mut class_static_fields = HashMap::new();
@@ -725,6 +775,21 @@ impl Interpreter {
             AstNode::FunctionCall { name, args } => {
                 self.call_function(name, args)
             }
+
+            AstNode::Call { callee, args } => {
+                let (callee_val, this_opt) = if let AstNode::DotAccess { object, field } = callee.as_ref() {
+                    let receiver = self.eval_node(object)?;
+                    let val = self.get_property(&receiver, field)?;
+                    let this_opt = match &receiver {
+                        Value::Instance { .. } => Some(receiver),
+                        _ => None,
+                    };
+                    (val, this_opt)
+                } else {
+                    (self.eval_node(callee)?, None)
+                };
+                self.call_value(callee_val, args, this_opt)
+            }
             
             AstNode::Binary { left, operator, right } => {
                 let left_val = self.eval_node(left)?;
@@ -784,6 +849,24 @@ impl Interpreter {
                             "label" | "name" => Ok(Value::String(variant_name)),
                             "value" => Ok(*value),
                             _ => Err(format!("Unknown property '{}' on enum variant", field))
+                        }
+                    }
+                    Value::Class { name: class_name, parent: _, fields: _, methods: _, static_fields, static_methods } => {
+                        if field == "new" {
+                            Ok(Value::Constructor(class_name.clone()))
+                        } else if let Some(v) = static_fields.get(field) {
+                            Ok(v.clone())
+                        } else if let Some(v) = static_methods.get(field) {
+                            Ok(v.clone())
+                        } else {
+                            Err(format!("Unknown static field or method '{}' on class '{}'", field, class_name))
+                        }
+                    }
+                    Value::Instance { class_name, fields } => {
+                        if let Some(v) = fields.get(field) {
+                            Ok(v.clone())
+                        } else {
+                            self.get_instance_method(class_name.as_str(), field)
                         }
                     }
                     Value::Dict(dict) => {
@@ -1058,6 +1141,39 @@ impl Interpreter {
                             _ => Err(format!("String method '{}' not found", field))
                         }
                     }
+                    Value::Counter(counter) => {
+                        match field.as_str() {
+                            "most_common" => {
+                                let mut items: Vec<_> = counter.iter().collect();
+                                items.sort_by(|a, b| b.1.cmp(a.1));
+                                let result: Vec<Value> = items.iter()
+                                    .map(|(k, v)| Value::Tuple(vec![Value::String(k.to_string()), Value::Integer(**v)]))
+                                    .collect();
+                                Ok(Value::List(result))
+                            }
+                            "elements" | "keys" => {
+                                let keys: Vec<Value> = counter.keys().map(|k| Value::String(k.clone())).collect();
+                                Ok(Value::List(keys))
+                            }
+                            "total" => {
+                                let total: i64 = counter.values().sum();
+                                Ok(Value::Integer(total))
+                            }
+                            "len" | "length" | "size" => Ok(Value::Integer(counter.len() as i64)),
+                            _ => Err(format!("Counter method '{}' not found", field)),
+                        }
+                    }
+                    Value::Grid(grid) => {
+                        let rows = grid.len() as i64;
+                        let cols = if grid.is_empty() { 0 } else { grid[0].len() as i64 };
+                        match field.as_str() {
+                            "rows" => Ok(Value::Integer(rows)),
+                            "cols" | "columns" => Ok(Value::Integer(cols)),
+                            "len" | "length" | "size" => Ok(Value::Integer(rows * cols)),
+                            "neighbors" => Ok(Value::GridNeighbors(Box::new(Value::Grid(grid.clone())))),
+                            _ => Err(format!("Grid method '{}' not found", field)),
+                        }
+                    }
                     _ => Err(format!("Cannot access field '{}' on type {}", field, 
                         match obj_val {
                             Value::Integer(_) => "integer",
@@ -1100,6 +1216,18 @@ impl Interpreter {
                             Ok(list[idx].clone())
                         } else {
                             Err(JError::index_out_of_bounds(i, list.len(), 0, 0).to_string())
+                        }
+                    }
+                    (Value::Grid(grid), Value::Integer(i)) => {
+                        let idx = if i < 0 {
+                            (grid.len() as i64 + i) as usize
+                        } else {
+                            i as usize
+                        };
+                        if idx < grid.len() {
+                            Ok(Value::List(grid[idx].clone()))
+                        } else {
+                            Err(format!("Grid row index {} out of bounds (rows {})", i, grid.len()))
                         }
                     }
                     (Value::String(s), Value::Integer(i)) => {
@@ -1753,13 +1881,40 @@ impl Interpreter {
             }
             
             AstNode::Block(statements) => {
+                self.defer_stack.push(Vec::new());
                 let mut last_val = Value::None;
-                
+
                 for stmt in statements {
-                    last_val = self.eval_node(stmt)?;
+                    if let AstNode::Defer(expr) = stmt {
+                        self.defer_stack.last_mut().unwrap().push(*expr.clone());
+                    } else {
+                        last_val = self.eval_node(stmt)?;
+                    }
                 }
-                
+
+                let defers = self.defer_stack.pop().unwrap();
+                for expr in defers.into_iter().rev() {
+                    self.eval_node(&expr)?;
+                }
                 Ok(last_val)
+            }
+
+            AstNode::Defer(_) => {
+                Ok(Value::None)
+            }
+
+            AstNode::ConvergeLoop { body } => {
+                let mut prev = Value::None;
+                loop {
+                    self.push_scope();
+                    self.set_variable("_".to_string(), prev.clone());
+                    let next = self.eval_node(body)?;
+                    self.pop_scope();
+                    if prev == next {
+                        break Ok(next);
+                    }
+                    prev = next;
+                }
             }
             
             AstNode::Expression(expr) => {
@@ -2150,8 +2305,21 @@ impl Interpreter {
             }
             
             // Generators and comprehensions
-            AstNode::Generator { .. } => {
-                Err("Generator not yet implemented".to_string())
+            AstNode::Generator { params, body } => {
+                // Create a generator function that yields values
+                Ok(Value::Function {
+                    name: "<generator>".to_string(),
+                    params: params.clone(),
+                    body: body.clone(),
+                })
+            }
+            
+            AstNode::Yield { value } => {
+                // Yield a value from a generator
+                let val = self.eval_node(value)?;
+                // In a real implementation, this would suspend execution
+                // For now, we'll just return the value
+                Ok(val)
             }
         }
     }
@@ -2358,10 +2526,13 @@ impl Interpreter {
                     Value::Channel(_) => "channel",
                     Value::Vector(_) => "vec",
                     Value::Matrix(_) => "mat",
+                    Value::Grid(_) => "grid",
+                    Value::GridNeighbors(_) => "grid_neighbors",
                     Value::Enum { .. } => "enum",
                     Value::EnumVariant { .. } => "enum_variant",
                             Value::Class { .. } => "class",
                             Value::Instance { .. } => "instance",
+                            Value::Constructor(_) => "constructor",
                             Value::None => "none",
                 };
                 Ok(Value::String(type_name.to_string()))
@@ -5539,10 +5710,13 @@ impl Interpreter {
                     Value::Channel(_) => "channel",
                     Value::Vector(_) => "vec",
                     Value::Matrix(_) => "mat",
+                    Value::Grid(_) => "grid",
+                    Value::GridNeighbors(_) => "grid_neighbors",
                     Value::Enum { .. } => "enum",
                     Value::EnumVariant { .. } => "enum_variant",
                             Value::Class { .. } => "class",
                             Value::Instance { .. } => "instance",
+                            Value::Constructor(_) => "constructor",
                             Value::None => "none",
                 };
                 Ok(Value::String(type_name.to_string()))
@@ -5784,7 +5958,7 @@ impl Interpreter {
                     for arg in args {
                         eval_args.push(self.eval_node(arg)?); // Evaluate arguments
                     }
-                    self.call_function_internal(name, &eval_args, &params, &*body)
+                    self.call_function_internal(name, &eval_args, &params, &*body, None)
                 } else {
                     Err(format!("'{}' is not a function", name))
                 }
@@ -6045,6 +6219,124 @@ impl Interpreter {
         }
     }
     
+    fn get_property(&self, obj: &Value, field: &str) -> Result<Value, String> {
+        match obj {
+            Value::Class { name: class_name, static_fields, static_methods, .. } => {
+                if field == "new" {
+                    Ok(Value::Constructor(class_name.clone()))
+                } else if let Some(v) = static_fields.get(field) {
+                    Ok(v.clone())
+                } else if let Some(v) = static_methods.get(field) {
+                    Ok(v.clone())
+                } else {
+                    Err(format!("Unknown static field or method '{}' on class '{}'", field, class_name))
+                }
+            }
+            Value::Instance { class_name, fields } => {
+                if let Some(v) = fields.get(field) {
+                    Ok(v.clone())
+                } else {
+                    self.get_instance_method(class_name, field)
+                }
+            }
+            Value::Grid(grid) => {
+                let rows = grid.len() as i64;
+                let cols = if grid.is_empty() { 0 } else { grid[0].len() as i64 };
+                match field {
+                    "rows" => Ok(Value::Integer(rows)),
+                    "cols" | "columns" => Ok(Value::Integer(cols)),
+                    "len" | "length" | "size" => Ok(Value::Integer(rows * cols)),
+                    "neighbors" => Ok(Value::GridNeighbors(Box::new(Value::Grid(grid.clone())))),
+                    _ => Err(format!("Grid method '{}' not found", field)),
+                }
+            }
+            Value::Counter(counter) => {
+                match field {
+                    "most_common" => {
+                        let mut items: Vec<_> = counter.iter().collect();
+                        items.sort_by(|a, b| b.1.cmp(a.1));
+                        let result: Vec<Value> = items.iter()
+                            .map(|(k, v)| Value::Tuple(vec![Value::String(k.to_string()), Value::Integer(**v)]))
+                            .collect();
+                        Ok(Value::List(result))
+                    }
+                    "elements" | "keys" => {
+                        let keys: Vec<Value> = counter.keys().map(|k| Value::String(k.clone())).collect();
+                        Ok(Value::List(keys))
+                    }
+                    "total" => Ok(Value::Integer(counter.values().sum())),
+                    "len" | "length" | "size" => Ok(Value::Integer(counter.len() as i64)),
+                    _ => Err(format!("Counter method '{}' not found", field)),
+                }
+            }
+            _ => Err(format!("Cannot get property '{}' on non-object", field)),
+        }
+    }
+
+    fn get_instance_method(&self, class_name: &str, method_name: &str) -> Result<Value, String> {
+        let class_val = self.get_variable(class_name)?;
+        if let Value::Class { methods, .. } = class_val {
+            methods.get(method_name).cloned()
+                .ok_or_else(|| format!("Unknown method '{}' on class '{}'", method_name, class_name))
+        } else {
+            Err(format!("'{}' is not a class", class_name))
+        }
+    }
+
+    fn call_value(&mut self, callee: Value, args: &[AstNode], this_opt: Option<Value>) -> Result<Value, String> {
+        let eval_args: Vec<Value> = args.iter().map(|a| self.eval_node(a)).collect::<Result<Vec<_>, _>>()?;
+        match callee {
+            Value::Constructor(class_name) => {
+                let class_val = self.get_variable(&class_name)?;
+                let Value::Class { name: _, parent: _, fields: class_fields, methods, static_fields: _, static_methods: _ } = class_val else {
+                    return Err(format!("'{}' is not a class", class_name));
+                };
+                let instance_fields = class_fields.clone();
+                let instance = Value::Instance {
+                    class_name: class_name.clone(),
+                    fields: instance_fields.clone(),
+                };
+                if let Some(init) = methods.get("init") {
+                    if let Value::Function { params, body, .. } = init {
+                        self.call_function_internal("init", &eval_args, params, body, Some(instance.clone()))?;
+                    }
+                }
+                Ok(instance)
+            }
+            Value::Function { name, params, body } => {
+                self.call_function_internal(&name, &eval_args, &params, &*body, this_opt)
+            }
+            Value::GridNeighbors(grid_val) => {
+                let Value::Grid(grid) = grid_val.as_ref() else {
+                    return Err("GridNeighbors requires a grid".to_string());
+                };
+                if eval_args.len() != 2 {
+                    return Err("grid.neighbors(i, j) requires exactly 2 arguments (row, col)".to_string());
+                }
+                let i = match &eval_args[0] {
+                    Value::Integer(n) => *n as usize,
+                    _ => return Err("grid.neighbors row must be integer".to_string()),
+                };
+                let j = match &eval_args[1] {
+                    Value::Integer(n) => *n as usize,
+                    _ => return Err("grid.neighbors col must be integer".to_string()),
+                };
+                let rows = grid.len();
+                let cols = if grid.is_empty() { 0 } else { grid[0].len() };
+                let mut neighbors = Vec::new();
+                for (di, dj) in [(-1i64, 0), (1, 0), (0, -1), (0, 1)] {
+                    let ni = i as i64 + di;
+                    let nj = j as i64 + dj;
+                    if ni >= 0 && ni < rows as i64 && nj >= 0 && nj < cols as i64 {
+                        neighbors.push(grid[ni as usize][nj as usize].clone());
+                    }
+                }
+                Ok(Value::List(neighbors))
+            }
+            _ => Err(format!("Cannot call {} as function", callee)),
+        }
+    }
+
     fn get_variable(&self, name: &str) -> Result<Value, String> {
         // Check static variables first
         if let Some(value) = self.statics.get(name) {

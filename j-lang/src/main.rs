@@ -151,10 +151,24 @@ fn main() {
                 }
             };
             
-            let mut interpreter = Interpreter::new();
-            if let Err(e) = interpreter.run(&source) {
-                eprintln!("❌ Runtime error: {}", e);
-                std::process::exit(1);
+            let result = std::thread::Builder::new()
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || {
+                    let mut interpreter = Interpreter::new();
+                    interpreter.run(&source)
+                });
+            
+            match result {
+                Ok(handle) => {
+                    if let Err(e) = handle.join().unwrap() {
+                        eprintln!("❌ Runtime error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to spawn interpreter thread: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
         Some(("build", sub_matches)) => {

@@ -23,13 +23,14 @@ pub enum TokenType {
     // Types
     Str, Int, FloatType, Bool, List, Dict, Tuple, Vec, Mat,
     Vec3, Vec4, Mat2, Mat3, Mat4, Set, Counter,
-    Deque, PriorityQ, Graph, Tree,
+    Deque, PriorityQ, Graph, Tree, Grid,
     CharType, EmojiType, Ascii, MoneyType, HexType, DateType, TimeType, DateTimeType,
     Any, Expr, EnumType,
     
     // Keywords
     Fn, Class, EnumKeyword, Trait, Static, Pub, Priv,
     If, Else, Match, Case, While, Loop, For, In, Break, Continue,
+    Defer, Converge,
     Return, Yield, Async, Await, Task, Gen,
     Use, Mod, Let, Mut, Ref,
     Try, Catch, Finally, Panic,
@@ -96,6 +97,10 @@ pub enum TokenType {
     
     // Execute syntax
     Execute,        // j; (execute command)
+    
+    // Generator keywords
+    GenType,        // gen<T> type
+    YieldKeyword,   // yield
     
     // Additional operators
     Reverse,        // rev (reverse iteration)
@@ -686,6 +691,7 @@ impl Lexer {
             "priorityq" => TokenType::PriorityQ,
             "graph" => TokenType::Graph,
             "tree" => TokenType::Tree,
+            "grid" => TokenType::Grid,
             "char" => TokenType::CharType,
             "emoji" => TokenType::EmojiType,
             "ascii" => TokenType::Ascii,
@@ -716,6 +722,8 @@ impl Lexer {
             "in" => TokenType::In,
             "break" => TokenType::Break,
             "continue" => TokenType::Continue,
+            "defer" => TokenType::Defer,
+            "converge" => TokenType::Converge,
             "by" => TokenType::By,
             "of" => TokenType::Of,
             "with" => TokenType::With,
@@ -769,7 +777,7 @@ impl Lexer {
             "include" => TokenType::Include,
             
             "return" => TokenType::Return,
-            "yield" => TokenType::Yield,
+            "yield" => TokenType::YieldKeyword,
             "async" => TokenType::Async,
             "await" => TokenType::Await,
             "task" => TokenType::Task,

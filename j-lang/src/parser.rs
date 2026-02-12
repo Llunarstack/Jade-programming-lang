@@ -61,6 +61,11 @@ pub enum AstNode {
         name: String,
         args: Vec<AstNode>,
     },
+    /// Call on any expression (e.g. instance.method(args) or Class.new(args))
+    Call {
+        callee: Box<AstNode>,
+        args: Vec<AstNode>,
+    },
     Lambda {
         params: Vec<String>,
         body: Box<AstNode>,
@@ -135,6 +140,8 @@ pub enum AstNode {
     Return(Option<Box<AstNode>>),
     Break,
     Continue,
+    Defer(Box<AstNode>),
+    ConvergeLoop { body: Box<AstNode> },
     
     // Error handling
     TryExpression(Box<AstNode>), // expr?
@@ -316,10 +323,11 @@ pub enum AstNode {
     
     // Generators and comprehensions
     Generator {
-        var: String,
-        iterable: Box<AstNode>,
-        condition: Option<Box<AstNode>>,
-        transform: Box<AstNode>,
+        params: Vec<String>,
+        body: Box<AstNode>,
+    },
+    Yield {
+        value: Box<AstNode>,
     },
     ListComprehension {
         expr: Box<AstNode>,
@@ -529,12 +537,26 @@ impl Parser {
             return self.return_statement();
         }
         
+        if self.match_token(&TokenType::YieldKeyword) {
+            return self.yield_statement();
+        }
+        
         if self.match_token(&TokenType::Break) {
             return Ok(AstNode::Break);
         }
         
         if self.match_token(&TokenType::Continue) {
             return Ok(AstNode::Continue);
+        }
+
+        if self.match_token(&TokenType::Defer) {
+            let expr = self.expression()?;
+            return Ok(AstNode::Defer(Box::new(expr)));
+        }
+
+        if self.match_token(&TokenType::Converge) {
+            let body = self.block()?;
+            return Ok(AstNode::ConvergeLoop { body: Box::new(body) });
         }
         
         // Check for destructuring assignment: (a, b, c) = expression
@@ -567,6 +589,11 @@ impl Parser {
             if is_destructuring {
                 return self.destructuring_assignment();
             }
+        }
+        
+        // Block statement: { statements } (so { defer ... } is a block, not dict literal)
+        if self.check(&TokenType::LeftBrace) {
+            return self.block();
         }
         
         // Check for assignment statement: identifier = expression
@@ -662,6 +689,7 @@ impl Parser {
             TokenType::PriorityQ => "priorityq".to_string(),
             TokenType::Graph => "graph".to_string(),
             TokenType::Tree => "tree".to_string(),
+            TokenType::Grid => "grid".to_string(),
             TokenType::CharType => "char".to_string(),
             TokenType::EmojiType => "emoji".to_string(),
             TokenType::Ascii => "ascii".to_string(),
@@ -1108,6 +1136,16 @@ impl Parser {
         Ok(AstNode::Return(value))
     }
     
+    fn yield_statement(&mut self) -> Result<AstNode, String> {
+        let value = if self.check(&TokenType::Newline) || self.is_at_end() {
+            return Err("yield requires a value".to_string());
+        } else {
+            Box::new(self.expression()?)
+        };
+        
+        Ok(AstNode::Yield { value })
+    }
+    
     fn assignment_statement(&mut self) -> Result<AstNode, String> {
         let name = match &self.advance().token_type {
             TokenType::Identifier(name) => name.clone(),
@@ -1389,7 +1427,10 @@ impl Parser {
                 if let AstNode::Identifier(name) = expr {
                     expr = AstNode::FunctionCall { name, args };
                 } else {
-                    return Err("Invalid function call".to_string());
+                    expr = AstNode::Call {
+                        callee: Box::new(expr),
+                        args,
+                    };
                 }
             } else if self.match_token(&TokenType::Dot) {
                 // Dot access: expr.field
@@ -2113,7 +2154,7 @@ impl Parser {
             TokenType::Str | TokenType::Int | TokenType::FloatType | TokenType::Bool |
             TokenType::List | TokenType::Dict | TokenType::Tuple | TokenType::Vec | TokenType::Mat |
             TokenType::Vec3 | TokenType::Vec4 | TokenType::Mat2 | TokenType::Mat3 | TokenType::Mat4 |
-            TokenType::Set | TokenType::Counter | TokenType::Deque | TokenType::PriorityQ | TokenType::Graph | TokenType::Tree |
+            TokenType::Set | TokenType::Counter | TokenType::Deque | TokenType::PriorityQ | TokenType::Graph | TokenType::Tree | TokenType::Grid |
             TokenType::CharType | TokenType::EmojiType | TokenType::Ascii | TokenType::MoneyType |
             TokenType::HexType | TokenType::DateType | TokenType::TimeType | TokenType::DateTimeType |
             TokenType::Any | TokenType::Expr | TokenType::Exclamation
