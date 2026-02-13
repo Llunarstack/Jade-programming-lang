@@ -34,7 +34,20 @@ pub enum TokenType {
     Return, Yield, Async, Await, Task, Gen,
     Use, Mod, Let, Mut, Ref,
     Try, Catch, Finally, Panic,
-    Of, With, Cond, By,
+    Of, With, Cond, By, This, Self_,
+    // jnew_features: extensions, loops, security, enterprise, tooling
+    Extend, Phantom, Mirror, MemoVar,
+    Fuzz, Within, Rollback, Retry,
+    Race, Barrier, Pulse,
+    Untrusted, Secret, Secure, Canary,
+    Component, Contract, Workspace, Env,
+    Packet, Gui, Sql, Embed,
+    Triple, Shield, Deterministic, Audit, Layout, Fixed, Sequence,
+    Pure, Effect, Invariant, View,
+    Constraint, Solver, Window, Flood,
+    Ignite,
+    ConstantTimeEq,  // ~== operator
+    Tilde,           // ~ (single)
     
     // Operators
     Arrow,          // ->
@@ -303,6 +316,14 @@ impl Lexer {
                     Ok(Some(TokenType::GreaterEqual))
                 } else {
                     Ok(Some(TokenType::Greater))
+                }
+            }
+
+            '~' => {
+                if self.match_char('=') && self.match_char('=') {
+                    Ok(Some(TokenType::ConstantTimeEq))
+                } else {
+                    Ok(Some(TokenType::Tilde))
                 }
             }
             
@@ -724,10 +745,51 @@ impl Lexer {
             "continue" => TokenType::Continue,
             "defer" => TokenType::Defer,
             "converge" => TokenType::Converge,
+            "memo" => TokenType::MemoVar,
+            "extend" => TokenType::Extend,
+            "phantom" => TokenType::Phantom,
+            "mirror" => TokenType::Mirror,
+            "fuzz" => TokenType::Fuzz,
+            "within" => TokenType::Within,
+            "rollback" => TokenType::Rollback,
+            "retry" => TokenType::Retry,
+            "race" => TokenType::Race,
+            "barrier" => TokenType::Barrier,
+            "pulse" => TokenType::Pulse,
+            "untrusted" => TokenType::Untrusted,
+            "secret" => TokenType::Secret,
+            "secure" => TokenType::Secure,
+            "canary" => TokenType::Canary,
+            "component" => TokenType::Component,
+            "contract" => TokenType::Contract,
+            "workspace" => TokenType::Workspace,
+            "env" => TokenType::Env,
+            "packet" => TokenType::Packet,
+            "gui" => TokenType::Gui,
+            "sql" => TokenType::Sql,
+            "embed" => TokenType::Embed,
+            "triple" => TokenType::Triple,
+            "shield" => TokenType::Shield,
+            "deterministic" => TokenType::Deterministic,
+            "audit" => TokenType::Audit,
+            "layout" => TokenType::Layout,
+            "fixed" => TokenType::Fixed,
+            "sequence" => TokenType::Sequence,
+            "pure" => TokenType::Pure,
+            "effect" => TokenType::Effect,
+            "invariant" => TokenType::Invariant,
+            "view" => TokenType::View,
+            "constraint" => TokenType::Constraint,
+            "solver" => TokenType::Solver,
+            "window" => TokenType::Window,
+            "flood" => TokenType::Flood,
+            "ignite" => TokenType::Ignite,
             "by" => TokenType::By,
             "of" => TokenType::Of,
             "with" => TokenType::With,
             "cond" => TokenType::Cond,
+            "this" => TokenType::This,
+            "self" => TokenType::Self_,
             "rev" => TokenType::Reverse,
             "step" => TokenType::Step,
             "until" => TokenType::Until,

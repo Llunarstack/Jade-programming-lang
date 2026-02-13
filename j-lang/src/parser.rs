@@ -43,6 +43,7 @@ pub enum AstNode {
         value: Box<AstNode>,
         immutable: bool,
         is_static: bool,
+        type_modifier: Option<String>,  // "untrusted" | "secret" | "canary"
     },
     TypeConversion {
         target_type: String,
@@ -63,6 +64,11 @@ pub enum AstNode {
     },
     /// Call on any expression (e.g. instance.method(args) or Class.new(args))
     Call {
+        callee: Box<AstNode>,
+        args: Vec<AstNode>,
+    },
+    /// Broadcast call: fn.(list, scalar) applies fn element-wise (from jnew_features)
+    BroadcastCall {
         callee: Box<AstNode>,
         args: Vec<AstNode>,
     },
@@ -321,6 +327,96 @@ pub enum AstNode {
         args: Vec<AstNode>,
     },
     
+    // jnew_features: extensions, loops, security, enterprise, tooling
+    ExtendType {
+        target_type: String,
+        methods: Vec<AstNode>,
+    },
+    PhantomDecl { name: String },
+    MemoVarDeclaration {
+        var_type: String,
+        name: String,
+        params: Vec<(String, String)>,
+        body: Box<AstNode>,
+    },
+    FuzzLoop {
+        var_type: String,
+        var_name: String,
+        range_opt: Option<Box<AstNode>>,
+        condition: Box<AstNode>,
+        body: Box<AstNode>,
+        else_body: Option<Box<AstNode>>,
+    },
+    WithinLoop {
+        duration_expr: Box<AstNode>,
+        loop_var: Option<String>,
+        iterable: Option<Box<AstNode>>,
+        body: Box<AstNode>,
+        else_body: Option<Box<AstNode>>,
+    },
+    RollbackBlock {
+        retries: Option<u32>,
+        body: Box<AstNode>,
+    },
+    RetryKeyword,  // used inside rollback to trigger rollback
+    RaceBlock {
+        branches: Vec<(String, AstNode)>,
+    },
+    BarrierDecl { name: String, count: u32 },
+    RetryBlock {
+        attempts: u32,
+        backoff: String,
+        jitter: bool,
+        body: Box<AstNode>,
+    },
+    SecureBlock { body: Box<AstNode> },
+    ComponentDecl {
+        name: String,
+        deps: Vec<(String, String)>,
+        fields: Vec<ClassField>,
+        methods: Vec<AstNode>,
+    },
+    ContractDecl {
+        name: String,
+        methods: Vec<AstNode>,
+    },
+    WorkspaceBlock {
+        members: Vec<String>,
+        rules: Vec<(String, String)>,
+    },
+    TaskDecl {
+        name: String,
+        needs: Vec<String>,
+        body: Box<AstNode>,
+    },
+    EnvSchema {
+        name: String,
+        fields: Vec<(String, String, Option<AstNode>)>,
+    },
+    PacketDecl {
+        name: String,
+        fields: Vec<(String, u32)>,
+    },
+    FloodLoop {
+        start: Box<AstNode>,
+        body: Box<AstNode>,
+    },
+    WindowLoop {
+        var: String,
+        iterable: Box<AstNode>,
+        shrink_condition: Option<Box<AstNode>>,
+        body: Box<AstNode>,
+    },
+    SolverBlock {
+        name: String,
+        options: Vec<(String, AstNode)>,
+        body: Box<AstNode>,
+    },
+    DeferAttach {
+        resource: Box<AstNode>,
+        cleanup: Box<AstNode>,
+    },
+
     // Generators and comprehensions
     Generator {
         params: Vec<String>,
@@ -371,6 +467,7 @@ pub enum Pattern {
 pub enum BinaryOp {
     Add, Subtract, Multiply, Divide, Modulo, Power,
     Equal, NotEqual, Less, Greater, LessEqual, GreaterEqual,
+    ConstantTimeEq,  // ~== (secure constant-time equality)
     And, Or,
     Assign,
 }
@@ -434,6 +531,60 @@ impl Parser {
         if self.match_token(&TokenType::Class) {
             return self.class_declaration();
         }
+
+        // jnew_features: extend type | T { ... }
+        if self.match_token(&TokenType::Extend) {
+            return self.extend_type_declaration();
+        }
+        if self.match_token(&TokenType::Phantom) {
+            return self.phantom_declaration();
+        }
+        if self.match_token(&TokenType::Secure) {
+            return self.secure_block();
+        }
+        if self.match_token(&TokenType::Rollback) {
+            return self.rollback_block();
+        }
+        if self.match_token(&TokenType::Race) {
+            return self.race_block();
+        }
+        if self.match_token(&TokenType::Retry) {
+            return self.retry_block();
+        }
+        if self.match_token(&TokenType::Fuzz) {
+            return self.fuzz_loop();
+        }
+        if self.match_token(&TokenType::Within) {
+            return self.within_loop();
+        }
+        if self.match_token(&TokenType::Component) {
+            return self.component_declaration();
+        }
+        if self.match_token(&TokenType::Contract) {
+            return self.contract_declaration();
+        }
+        if self.match_token(&TokenType::Workspace) {
+            return self.workspace_block();
+        }
+        if self.match_token(&TokenType::Task) {
+            return self.task_declaration();
+        }
+        if self.match_token(&TokenType::Env) {
+            return self.env_schema();
+        }
+        if self.match_token(&TokenType::Flood) {
+            return self.flood_loop();
+        }
+        if self.match_token(&TokenType::Window) {
+            return self.window_loop();
+        }
+        if self.match_token(&TokenType::Solver) {
+            return self.solver_block();
+        }
+        // memo int | name (params) -> body (memo variable)
+        if self.check(&TokenType::MemoVar) {
+            return self.memo_var_declaration();
+        }
         
         // Check for decorators before function declaration
         if self.check(&TokenType::At) {
@@ -464,6 +615,9 @@ impl Parser {
                         }
                     }
                 }
+            }
+            while self.current < self.tokens.len() && matches!(self.tokens[self.current].token_type, TokenType::Newline) {
+                self.current += 1;
             }
             if self.current < self.tokens.len() && matches!(self.tokens[self.current].token_type, TokenType::Fn) {
                 found_fn = true;
@@ -657,15 +811,20 @@ impl Parser {
     fn var_declaration(&mut self) -> Result<AstNode, String> {
         let mut immutable = false;
         let mut is_static = false;
+        let mut type_modifier: Option<String> = None;
         
-        // Check for static prefix
         if self.match_token(&TokenType::Static) {
             is_static = true;
         }
-        
-        // Check for immutable prefix !
         if self.match_token(&TokenType::Exclamation) {
             immutable = true;
+        }
+        if self.match_token(&TokenType::Untrusted) {
+            type_modifier = Some("untrusted".to_string());
+        } else if self.match_token(&TokenType::Secret) {
+            type_modifier = Some("secret".to_string());
+        } else if self.match_token(&TokenType::Canary) {
+            type_modifier = Some("canary".to_string());
         }
         
         let var_type = match &self.advance().token_type {
@@ -721,6 +880,7 @@ impl Parser {
             value: Box::new(value),
             immutable,
             is_static,
+            type_modifier,
         })
     }
     
@@ -728,7 +888,8 @@ impl Parser {
         self.consume(&TokenType::At, "Expected '@' for decorator")?;
         
         let name = match &self.advance().token_type {
-            TokenType::Identifier(name) => name.clone(),
+            TokenType::Identifier(n) => n.clone(),
+            TokenType::MemoVar => "memo".to_string(),
             _ => return Err("Expected decorator name after '@'".to_string()),
         };
         
@@ -758,9 +919,7 @@ impl Parser {
         while self.check(&TokenType::At) {
             decorators.push(self.parse_decorator()?);
         }
-        
-
-        
+        while self.match_token(&TokenType::Newline) {}
         // Consume Fn token if present
         if self.check(&TokenType::Fn) {
             self.advance();
@@ -823,7 +982,7 @@ impl Parser {
     
     fn if_statement(&mut self) -> Result<AstNode, String> {
         let condition = self.expression()?;
-        
+        while self.match_token(&TokenType::Newline) {}
         let then_branch = if self.check(&TokenType::LeftBrace) {
             self.block()?
         } else {
@@ -831,6 +990,7 @@ impl Parser {
         };
         
         let else_branch = if self.match_token(&TokenType::Else) {
+            while self.match_token(&TokenType::Newline) {}
             Some(Box::new(if self.check(&TokenType::LeftBrace) {
                 self.block()?
             } else {
@@ -1433,15 +1593,46 @@ impl Parser {
                     };
                 }
             } else if self.match_token(&TokenType::Dot) {
-                // Dot access: expr.field
-                let field = match &self.advance().token_type {
-                    TokenType::Identifier(name) => name.clone(),
-                    _ => return Err("Expected field name after '.'".to_string()),
-                };
-                expr = AstNode::DotAccess {
-                    object: Box::new(expr),
-                    field,
-                };
+                // expr.defer(cleanup) -> DeferAttach (defer can be keyword or identifier)
+                let is_defer = matches!(&self.peek().token_type, TokenType::Identifier(n) if n == "defer")
+                    || self.check(&TokenType::Defer);
+                if is_defer {
+                    self.advance(); // consume 'defer'
+                    self.consume(&TokenType::LeftParen, "Expected '(' after .defer")?;
+                    let cleanup = self.expression()?;
+                    self.consume(&TokenType::RightParen, "Expected ')' after .defer(expr)")?;
+                    expr = AstNode::DeferAttach {
+                        resource: Box::new(expr),
+                        cleanup: Box::new(cleanup),
+                    };
+                } else if let TokenType::Identifier(name) = &self.peek().token_type {
+                    // Dot access: expr.field
+                    let field = name.clone();
+                    self.advance();
+                    expr = AstNode::DotAccess {
+                        object: Box::new(expr),
+                        field,
+                    };
+                } else if self.check(&TokenType::LeftParen) {
+                    // Broadcast call: expr.(args)
+                    self.advance(); // consume '('
+                    let mut args = Vec::new();
+                    if !self.check(&TokenType::RightParen) {
+                        loop {
+                            args.push(self.expression()?);
+                            if !self.match_token(&TokenType::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.consume(&TokenType::RightParen, "Expected ')' after broadcast arguments")?;
+                    expr = AstNode::BroadcastCall {
+                        callee: Box::new(expr),
+                        args,
+                    };
+                } else {
+                    return Err("Expected field name or '(' after '.'".to_string());
+                }
             } else if self.match_token(&TokenType::LeftBracket) {
                 // Check if this is slicing (contains ..) or indexing
                 let _start_pos = self.current;
@@ -1540,6 +1731,8 @@ impl Parser {
             TokenType::DateTime(datetime) => Ok(AstNode::DateTime(datetime.clone())),
             TokenType::Infinity(positive) => Ok(AstNode::Infinity(*positive)),
             TokenType::Identifier(name) => Ok(AstNode::Identifier(name.clone())),
+            TokenType::This => Ok(AstNode::Identifier("this".to_string())),
+            TokenType::Self_ => Ok(AstNode::Identifier("this".to_string())),
             TokenType::Underscore => Ok(AstNode::Underscore),
             
             TokenType::Pipe => {
@@ -1870,6 +2063,8 @@ impl Parser {
                 false
             };
             
+            // Optional 'mirror' before method (for handle_missing / dynamic dispatch)
+            let _is_mirror = self.match_token(&TokenType::Mirror);
             // Check if it's a method (fn) or field (type)
             if self.check(&TokenType::Fn) {
                 self.advance(); // consume fn
@@ -1937,6 +2132,390 @@ impl Parser {
             methods,
             static_fields,
             static_methods,
+        })
+    }
+
+    fn extend_type_declaration(&mut self) -> Result<AstNode, String> {
+        self.consume(&TokenType::Pipe, "Expected '|' after 'extend'")?;
+        match &self.advance().token_type {
+            TokenType::Identifier(t) if t == "type" => {},
+            _ => return Err("Expected 'type'".to_string()),
+        }
+        self.consume(&TokenType::Pipe, "Expected '|'")?;
+        let target_type = match &self.advance().token_type {
+            TokenType::Identifier(t) => t.clone(),
+            TokenType::Int => "int".to_string(),
+            TokenType::Str => "str".to_string(),
+            TokenType::List => "list".to_string(),
+            _ => return Err("Expected type name".to_string()),
+        };
+        self.consume(&TokenType::LeftBrace, "Expected '{'")?;
+        let mut methods = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            if self.match_token(&TokenType::Newline) { continue; }
+            if self.check(&TokenType::Fn) { methods.push(self.function_declaration()?); }
+            else { break; }
+        }
+        self.consume(&TokenType::RightBrace, "Expected '}'")?;
+        Ok(AstNode::ExtendType { target_type, methods })
+    }
+
+    fn phantom_declaration(&mut self) -> Result<AstNode, String> {
+        self.consume(&TokenType::Pipe, "Expected '|' after 'phantom'")?;
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected phantom tag name".to_string()),
+        };
+        Ok(AstNode::PhantomDecl { name })
+    }
+
+    fn secure_block(&mut self) -> Result<AstNode, String> {
+        while self.match_token(&TokenType::Newline) {}
+        let body = self.block()?;
+        Ok(AstNode::SecureBlock { body: Box::new(body) })
+    }
+
+    fn rollback_block(&mut self) -> Result<AstNode, String> {
+        while self.match_token(&TokenType::Newline) {}
+        let retries = if self.check(&TokenType::LeftParen) {
+            self.advance();
+            let r = if let TokenType::Identifier(s) = &self.peek().token_type {
+                if s == "retries" {
+                    self.advance();
+                    self.consume(&TokenType::Colon, "Expected ':'")?;
+                    let n = self.expression()?;
+                    if let AstNode::Integer(i) = n { Some(i as u32) } else { None }
+                } else { None }
+            } else { None };
+            self.consume(&TokenType::RightParen, "Expected ')'")?;
+            r
+        } else { None };
+        while self.match_token(&TokenType::Newline) {}
+        let body = self.block()?;
+        Ok(AstNode::RollbackBlock { retries, body: Box::new(body) })
+    }
+
+    fn race_block(&mut self) -> Result<AstNode, String> {
+        while self.match_token(&TokenType::Newline) {}
+        self.consume(&TokenType::LeftBrace, "Expected '{' after 'race'")?;
+        let mut branches = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            if self.match_token(&TokenType::Newline) { continue; }
+            let label = match &self.advance().token_type {
+                TokenType::String(s) => s.clone(),
+                TokenType::Identifier(s) => s.clone(),
+                _ => return Err("Expected branch label".to_string()),
+            };
+            self.consume(&TokenType::Colon, "Expected ':'")?;
+            let expr = self.expression()?;
+            branches.push((label, expr));
+        }
+        self.consume(&TokenType::RightBrace, "Expected '}'")?;
+        Ok(AstNode::RaceBlock { branches })
+    }
+
+    fn retry_block(&mut self) -> Result<AstNode, String> {
+        let (attempts, backoff, jitter) = if self.check(&TokenType::LeftParen) {
+            self.advance();
+            let mut a = 4u32;
+            let mut b = "exp".to_string();
+            let mut j = true;
+            while !self.check(&TokenType::RightParen) {
+                if let TokenType::Identifier(s) = &self.peek().token_type {
+                    if s == "attempts" {
+                        self.advance();
+                        self.consume(&TokenType::Colon, "Expected ':'")?;
+                        if let AstNode::Integer(i) = self.expression()? { a = i as u32; }
+                    } else if s == "backoff" {
+                        self.advance();
+                        self.consume(&TokenType::Colon, "Expected ':'")?;
+                        if let AstNode::String(s) = self.expression()? { b = s; }
+                    } else if s == "jitter" {
+                        self.advance();
+                        self.consume(&TokenType::Colon, "Expected ':'")?;
+                        if let AstNode::Boolean(b) = self.expression()? { j = b; }
+                    } else { break; }
+                } else { break; }
+                self.match_token(&TokenType::Comma);
+            }
+            self.consume(&TokenType::RightParen, "Expected ')'")?;
+            (a, b, j)
+        } else { (4, "exp".to_string(), true) };
+        while self.match_token(&TokenType::Newline) {}
+        let body = self.block()?;
+        Ok(AstNode::RetryBlock { attempts, backoff, jitter, body: Box::new(body) })
+    }
+
+    fn fuzz_loop(&mut self) -> Result<AstNode, String> {
+        let var_type = match &self.advance().token_type {
+            TokenType::Int => "int".to_string(),
+            TokenType::Str => "str".to_string(),
+            TokenType::Identifier(t) => t.clone(),
+            _ => return Err("Expected type in fuzz".to_string()),
+        };
+        self.consume(&TokenType::Pipe, "Expected '|'")?;
+        let var_name = match &self.advance().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected variable name".to_string()),
+        };
+        let range_opt = if self.match_token(&TokenType::In) {
+            Some(Box::new(self.expression()?))
+        } else { None };
+        let (condition, body, else_body) = if self.match_token(&TokenType::Colon) {
+            let cond = self.expression()?;
+            let b = if self.check(&TokenType::LeftBrace) { self.block()? } else { cond.clone() };
+            let els = if self.match_token(&TokenType::Else) { Some(Box::new(self.block()?)) } else { None };
+            (Box::new(cond), Box::new(b), els)
+        } else {
+            let body = self.block()?;
+            let else_body = if self.match_token(&TokenType::Else) { Some(Box::new(self.block()?)) } else { None };
+            (Box::new(AstNode::Boolean(true)), Box::new(body), else_body)
+        };
+        Ok(AstNode::FuzzLoop {
+            var_type,
+            var_name,
+            range_opt,
+            condition,
+            body,
+            else_body,
+        })
+    }
+
+    fn within_loop(&mut self) -> Result<AstNode, String> {
+        let duration_expr = Box::new(self.expression()?);
+        let (loop_var, iterable) = if self.match_token(&TokenType::Pipe) {
+            let var = match &self.advance().token_type {
+                TokenType::Identifier(n) => n.clone(),
+                _ => return Err("Expected loop variable".to_string()),
+            };
+            self.consume(&TokenType::In, "Expected 'in'")?;
+            let iter = self.expression()?;
+            (Some(var), Some(Box::new(iter)))
+        } else { (None, None) };
+        let body = self.block()?;
+        let else_body = if self.match_token(&TokenType::Else) { Some(Box::new(self.block()?)) } else { None };
+        Ok(AstNode::WithinLoop { duration_expr, loop_var, iterable, body: Box::new(body), else_body })
+    }
+
+    fn component_declaration(&mut self) -> Result<AstNode, String> {
+        self.consume(&TokenType::Pipe, "Expected '|'")?;
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected component name".to_string()),
+        };
+        self.consume(&TokenType::LeftBrace, "Expected '{'")?;
+        let mut deps = Vec::new();
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            if self.match_token(&TokenType::Newline) { continue; }
+            if self.check(&TokenType::Fn) {
+                self.advance();
+                methods.push(self.function_declaration()?);
+            } else if self.is_type_token() {
+                let ft = self.advance().lexeme.clone();
+                self.consume(&TokenType::Pipe, "Expected '|'")?;
+                let fn_name = match &self.advance().token_type {
+                    TokenType::Identifier(n) => n.clone(),
+                    _ => return Err("Expected field name".to_string()),
+                };
+                deps.push((ft, fn_name));
+            } else { break; }
+        }
+        self.consume(&TokenType::RightBrace, "Expected '}'")?;
+        Ok(AstNode::ComponentDecl { name, deps, fields, methods })
+    }
+
+    fn contract_declaration(&mut self) -> Result<AstNode, String> {
+        self.consume(&TokenType::Pipe, "Expected '|'")?;
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected contract name".to_string()),
+        };
+        self.consume(&TokenType::LeftBrace, "Expected '{'")?;
+        let mut methods = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            if self.match_token(&TokenType::Newline) { continue; }
+            if self.check(&TokenType::Fn) {
+                self.advance();
+                methods.push(self.function_declaration()?);
+            } else { break; }
+        }
+        self.consume(&TokenType::RightBrace, "Expected '}'")?;
+        Ok(AstNode::ContractDecl { name, methods })
+    }
+
+    fn workspace_block(&mut self) -> Result<AstNode, String> {
+        self.consume(&TokenType::LeftBrace, "Expected '{' after 'workspace'")?;
+        let mut members = Vec::new();
+        let mut rules = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            if self.match_token(&TokenType::Newline) { continue; }
+            if let TokenType::Identifier(s) = &self.peek().token_type {
+                if s == "members" {
+                    self.advance();
+                    self.consume(&TokenType::Assign, "Expected '='")?;
+                    if let AstNode::List(l) = self.expression()? {
+                        for e in l {
+                            if let AstNode::String(s) = e { members.push(s); }
+                        }
+                    }
+                } else if s == "rules" {
+                    self.advance();
+                    self.consume(&TokenType::Assign, "Expected '='")?;
+                    self.consume(&TokenType::LeftBrace, "Expected '{'")?;
+                    while !self.check(&TokenType::RightBrace) {
+                        let k = self.expression()?;
+                        let v = self.expression()?;
+                        rules.push((format!("{:?}", k), format!("{:?}", v)));
+                    }
+                    self.advance();
+                } else { break; }
+            } else { break; }
+        }
+        self.consume(&TokenType::RightBrace, "Expected '}'")?;
+        Ok(AstNode::WorkspaceBlock { members, rules })
+    }
+
+    fn task_declaration(&mut self) -> Result<AstNode, String> {
+        self.consume(&TokenType::Pipe, "Expected '|'")?;
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected task name".to_string()),
+        };
+        let needs: Vec<String> = if self.check(&TokenType::LeftParen) {
+            self.advance();
+            if let TokenType::Identifier(n) = &self.advance().token_type {
+                if n != "needs" { return Err("Expected 'needs'".to_string()); }
+            } else { return Err("Expected 'needs'".to_string()); }
+            self.consume(&TokenType::Colon, "Expected ':'")?;
+            let mut n = Vec::new();
+            if let AstNode::List(l) = self.expression()? {
+                for e in l {
+                    if let AstNode::String(s) = e { n.push(s); }
+                }
+            }
+            self.consume(&TokenType::RightParen, "Expected ')'")?;
+            n
+        } else { Vec::new() };
+        self.consume(&TokenType::Greater, "Expected '>'")?;
+        while self.match_token(&TokenType::Newline) {}
+        let body = self.block()?;
+        Ok(AstNode::TaskDecl { name, needs, body: Box::new(body) })
+    }
+
+    fn env_schema(&mut self) -> Result<AstNode, String> {
+        self.consume(&TokenType::Pipe, "Expected '|'")?;
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected env schema name".to_string()),
+        };
+        self.consume(&TokenType::LeftBrace, "Expected '{'")?;
+        let mut fields = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            if self.match_token(&TokenType::Newline) { continue; }
+            let t = match &self.advance().token_type {
+                TokenType::Str => "str".to_string(),
+                TokenType::Int => "int".to_string(),
+                TokenType::Bool => "bool".to_string(),
+                TokenType::Identifier(x) => x.clone(),
+                _ => return Err("Expected type".to_string()),
+            };
+            self.consume(&TokenType::Pipe, "Expected '|'")?;
+            let n = match &self.advance().token_type {
+                TokenType::Identifier(x) => x.clone(),
+                _ => return Err("Expected field name".to_string()),
+            };
+            let default = if self.match_token(&TokenType::Arrow) { Some(self.expression()?) } else { None };
+            fields.push((t, n, default));
+        }
+        self.consume(&TokenType::RightBrace, "Expected '}'")?;
+        Ok(AstNode::EnvSchema { name, fields })
+    }
+
+    fn flood_loop(&mut self) -> Result<AstNode, String> {
+        let start = Box::new(self.expression()?);
+        let body = self.block()?;
+        Ok(AstNode::FloodLoop { start, body: Box::new(body) })
+    }
+
+    fn window_loop(&mut self) -> Result<AstNode, String> {
+        let var = match &self.peek().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected variable name".to_string()),
+        };
+        self.advance();
+        self.consume(&TokenType::In, "Expected 'in'")?;
+        let iterable = Box::new(self.expression()?);
+        let shrink_condition = if self.check(&TokenType::LeftParen) {
+            self.advance();
+            let cond = self.expression()?;
+            self.consume(&TokenType::RightParen, "Expected ')'")?;
+            Some(Box::new(cond))
+        } else { None };
+        let body = self.block()?;
+        Ok(AstNode::WindowLoop { var, iterable, shrink_condition, body: Box::new(body) })
+    }
+
+    fn solver_block(&mut self) -> Result<AstNode, String> {
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected solver name".to_string()),
+        };
+        self.consume(&TokenType::LeftParen, "Expected '('")?;
+        let mut options = Vec::new();
+        while !self.check(&TokenType::RightParen) {
+            let k = match &self.advance().token_type {
+                TokenType::Identifier(x) => x.clone(),
+                _ => return Err("Expected option name".to_string()),
+            };
+            self.consume(&TokenType::Colon, "Expected ':'")?;
+            options.push((k, self.expression()?));
+            self.match_token(&TokenType::Comma);
+        }
+        self.advance();
+        let body = self.block()?;
+        Ok(AstNode::SolverBlock { name, options, body: Box::new(body) })
+    }
+
+    fn memo_var_declaration(&mut self) -> Result<AstNode, String> {
+        self.advance(); // consume memo
+        let var_type = match &self.advance().token_type {
+            TokenType::Int => "int".to_string(),
+            TokenType::Str => "str".to_string(),
+            TokenType::Identifier(t) => t.clone(),
+            _ => return Err("Expected type".to_string()),
+        };
+        self.consume(&TokenType::Pipe, "Expected '|'")?;
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err("Expected variable name".to_string()),
+        };
+        self.consume(&TokenType::LeftParen, "Expected '('")?;
+        let mut params = Vec::new();
+        while !self.check(&TokenType::RightParen) {
+            let t = match &self.advance().token_type {
+                TokenType::Int => "int".to_string(),
+                TokenType::Str => "str".to_string(),
+                TokenType::Identifier(x) => x.clone(),
+                _ => return Err("Expected param type".to_string()),
+            };
+            self.consume(&TokenType::Pipe, "Expected '|'")?;
+            let p = match &self.advance().token_type {
+                TokenType::Identifier(x) => x.clone(),
+                _ => return Err("Expected param name".to_string()),
+            };
+            params.push((t, p));
+            self.match_token(&TokenType::Comma);
+        }
+        self.advance();
+        self.consume(&TokenType::Arrow, "Expected '->'")?;
+        let body = self.expression()?;
+        Ok(AstNode::MemoVarDeclaration {
+            var_type,
+            name,
+            params,
+            body: Box::new(body),
         })
     }
     
@@ -2157,7 +2736,8 @@ impl Parser {
             TokenType::Set | TokenType::Counter | TokenType::Deque | TokenType::PriorityQ | TokenType::Graph | TokenType::Tree | TokenType::Grid |
             TokenType::CharType | TokenType::EmojiType | TokenType::Ascii | TokenType::MoneyType |
             TokenType::HexType | TokenType::DateType | TokenType::TimeType | TokenType::DateTimeType |
-            TokenType::Any | TokenType::Expr | TokenType::Exclamation
+            TokenType::Any | TokenType::Expr | TokenType::Exclamation |
+            TokenType::Untrusted | TokenType::Secret | TokenType::Canary
         )
     }
     
@@ -2166,6 +2746,8 @@ impl Parser {
             Some(BinaryOp::Equal)
         } else if self.match_token(&TokenType::NotEqual) {
             Some(BinaryOp::NotEqual)
+        } else if self.match_token(&TokenType::ConstantTimeEq) {
+            Some(BinaryOp::ConstantTimeEq)
         } else {
             None
         }

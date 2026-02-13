@@ -1,136 +1,105 @@
-# J Language - Missing Features Summary
+# J Language - Implementation Progress
 
-## CRITICAL FEATURES TO IMPLEMENT (from jnew_features.txt)
+Based on code review, here's what's actually implemented and what needs work:
 
-### 1. CLASS SYSTEM (Partially Done)
-- ✅ Class declaration syntax
-- ✅ Class and Instance Value types
-- ❌ Class instantiation: ClassName.new(args)
-- ❌ Method calls on instances: instance.method()
-- ❌ Constructor support
+## PHASE 1: Core OOP - PARTIALLY DONE
+- ✅ Class declaration syntax (working)
+- ✅ Class and Instance Value types (implemented in Value enum)
+- ✅ Class.new() constructor call (Value::Constructor implemented)
+- ✅ Method storage in classes (methods HashMap exists)
+- ⚠️  Instance method calls (get_instance_method exists but needs testing)
+- ❌ `this` keyword for self-reference in methods
+- ❌ Constructor (init method) with parameters
 - ❌ Inheritance implementation
 
-### 2. ADVANCED TYPES
-- ✅ Counter type (exists in Value enum)
-- ❌ Grid type (2D arrays with neighbor logic)
-- ❌ Fixed precision type (banking math)
-- ❌ Phantom types (zero-cost type tags)
-- ❌ Secret types (memory-protected)
-- ❌ Canary types (corruption detection)
+## IMMEDIATE PRIORITIES
 
-### 3. ADVANCED LOOPS
-- ❌ converge loop (fixed-point iteration)
-- ❌ fuzz loop (chaos testing)
-- ❌ within loop (time-bounded execution)
-- ❌ rollback loop (transactional memory)
-- ❌ window loop (sliding window)
-- ❌ flood loop (BFS/DFS traversal)
+### 1. Add `this` keyword support
+The interpreter has `this_opt` parameter in call_function_internal but the lexer doesn't recognize `this` as a keyword.
 
-### 4. ASYNC/CONCURRENCY
-- ❌ race block (competitive concurrency)
-- ❌ pulse stream (reactive async)
-- ❌ barrier function (synchronization)
-- ❌ retry with jitter
-- ❌ memo async (TTL caching)
+### 2. Fix parser issues with Class.field access
+Parser seems to fail when accessing static fields/methods or calling .new()
 
-### 5. SECURITY FEATURES
+### 3. Implement Counter methods
+Counter type exists but needs:
+- most_common() - DONE in get_property
+- elements() - DONE
+- total() - DONE  
+- Arithmetic operations (counter1 + counter2, counter1 - counter2)
+
+### 4. Implement Grid type features
+Grid type exists, needs:
+- .neighbors(i, j) method - DONE (GridNeighbors value)
+- .neighbors(i, j, diag: bool) for 8-directional
+- Boundary checking
+- .find_all(value) method
+
+### 5. Implement defer statement
+AST node exists (Defer) but not evaluated in interpreter
+
+### 6. Implement window loop
+AST node exists (WindowLoop) but not evaluated
+
+### 7. Implement converge loop  
+AST node exists (ConvergeLoop) but not fully implemented
+
+### 8. Implement flood loop
+AST node exists (FloodLoop) but not evaluated
+
+## PHASE 2: Algorithm Support Features
+
+### Grid enhancements
+- ✅ Grid type exists
+- ✅ Basic neighbors() - implemented
+- ❌ 8-directional neighbors (diag parameter)
+- ❌ .find_all() method
+- ❌ .row(n), .col(n) accessors
+- ❌ .rows_where(), .cols_where() conditional selection
+
+### Counter enhancements  
+- ✅ Counter type exists
+- ✅ Basic methods (most_common, elements, total)
+- ❌ Arithmetic (+ - operations between counters)
+- ❌ .subtract() method
+- ❌ .update() method
+
+### New loop types
+- ❌ window loop (sliding window) - AST exists, needs eval
+- ❌ converge loop (fixed-point) - AST exists, needs completion
+- ❌ flood loop (BFS/DFS) - AST exists, needs eval
+- ❌ fuzz loop (chaos testing) - AST exists, needs eval
+- ❌ within loop (time-bounded) - AST exists, needs eval
+- ❌ rollback loop (transactional) - AST exists, needs eval
+
+## PHASE 3: Advanced Features
+
+### Async/Concurrency
+- ❌ race block - AST exists
+- ❌ barrier - AST exists  
+- ❌ retry with backoff - AST exists
+- ❌ pulse streams
+- ❌ task spawning
+
+### Security
 - ❌ untrusted type (taint analysis)
 - ❌ secret type (protected memory)
-- ❌ secure blocks (constant-time execution)
-- ❌ sandbox capabilities
+- ❌ secure blocks (constant-time)
 - ❌ canary values
 
-### 6. ENTERPRISE FEATURES
-- ❌ component & auto-wiring (DI)
-- ❌ contract interfaces (API-first)
-- ❌ Built-in observability (metrics/trace)
-- ❌ workspace (monorepo support)
+### Enterprise
+- ❌ component & DI - AST exists
+- ❌ contract interfaces - AST exists
+- ❌ workspace - AST exists
+- ❌ Built-in observability
 
-### 7. AI/ML FEATURES
-- ❌ strategy blocks (distributed training)
-- ❌ sharded tensors
-- ❌ streaming datasets
-- ❌ neuro_evolve
+## NEXT STEPS
 
-### 8. TOOLING
-- ❌ task & build system
-- ❌ sql native blocks
-- ❌ packet binary layouts
-- ❌ gui native desktop
-- ❌ doc interactive documentation
-- ❌ env schema
-
-### 9. ALGORITHM HELPERS
-- ❌ grid type with .neighbors()
-- ❌ flood loop
-- ❌ window loop
-- ❌ scan/fold vectors
-- ❌ solver block (backtracking)
-- ✅ counter type (exists, needs methods)
-
-### 10. IMPORT SYSTEM
-- ❌ use statement (J to J)
-- ❌ foreign bridge (Python/JS)
-- ❌ embed block (inline C)
-- ❌ live use (hot-reload)
-- ❌ sandboxed imports
-
-### 11. CRITICAL SYSTEMS
-- ❌ fixed precision (COBOL-grade math)
-- ❌ @prove (formal verification)
-- ❌ audit classes (immutable ledger)
-- ❌ layout (bit-perfect memory)
-- ❌ deterministic blocks
-- ❌ triple (radiation hardening)
-- ❌ shield blocks (fault recovery)
-- ❌ @no_heap enforcement
-- ❌ sequence (state machine)
-- ❌ pure/effect functions
-- ❌ invariant (perpetual truths)
-
-### 12. MISC FEATURES
-- ❌ Scoped extensions (extend type)
-- ❌ Broadcast dot operator
-- ❌ Defer statements
-- ❌ Mirror blocks (dynamic dispatch)
-- ❌ Memo variables
-- ❌ Phantom types
-- ❌ snapshot errors (post-mortem debugging)
-- ❌ alias keywords (multilingual)
-- ❌ evolve blocks (DB migrations)
-- ❌ comptime (compile-time execution)
-- ❌ eco mode (battery awareness)
-
-## PRIORITY IMPLEMENTATION ORDER
-
-### Phase 1: Core OOP (IMMEDIATE)
-1. Class instantiation (ClassName.new())
-2. Method calls on instances
-3. Constructor support
-4. this/self binding in methods
-
-### Phase 2: Algorithm Support (HIGH PRIORITY)
-1. Grid type with neighbors()
-2. Counter methods (most_common, etc.)
-3. Window loop (sliding window)
-4. Defer statements
-
-### Phase 3: Advanced Features (MEDIUM PRIORITY)
-1. Converge loop
-2. Flood loop
-3. Fixed precision type
-4. Async basics (race, barrier)
-
-### Phase 4: Enterprise/Production (LOWER PRIORITY)
-1. Audit classes
-2. Deterministic blocks
-3. Component system
-4. Import system
-
-## NOTES
-- The interpreter already has 200+ built-in functions
-- Most basic types are implemented
-- For loops have all variants
-- Pattern matching works
-- Error handling (try/catch) works
-- Rich output (colors, tables, animations) works
+1. Add `this` keyword to lexer and parser
+2. Debug and fix Class.field parser issue
+3. Implement defer statement evaluation
+4. Implement window loop evaluation
+5. Implement converge loop completion
+6. Implement flood loop evaluation
+7. Add Counter arithmetic operations
+8. Add Grid 8-directional neighbors
+9. Implement constructor with parameters (init method)
