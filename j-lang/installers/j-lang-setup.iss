@@ -128,14 +128,16 @@ Root: HKA; Subkey: "Software\Classes\.j"; ValueType: string; ValueName: "Content
 Root: HKA; Subkey: "Software\Classes\.j"; ValueType: string; ValueName: "PerceivedType"; ValueData: "text"; Tasks: fileassoc
 
 Root: HKA; Subkey: "Software\Classes\JSourceFile"; ValueType: string; ValueName: ""; ValueData: "J Source File"; Flags: uninsdeletekey; Tasks: fileassoc
-Root: HKA; Subkey: "Software\Classes\JSourceFile"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "J Source File"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "J Programming Language Source File"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile"; ValueType: string; ValueName: "AlwaysShowExt"; ValueData: ""; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\J_lang.ico,0"; Tasks: fileassoc
 
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell"; ValueType: string; ValueName: ""; ValueData: "open"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\open"; ValueType: string; ValueName: ""; ValueData: "Run with J"; Tasks: fileassoc
-Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" run ""%1"""; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\J_lang.ico,0"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: "cmd.exe /k ""{app}\{#MyAppExeName}"" run ""%1"" && pause"; Tasks: fileassoc
 
-Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit"; ValueType: string; ValueName: ""; ValueData: "Edit"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit"; ValueType: string; ValueName: ""; ValueData: "Edit with Notepad"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit\command"; ValueType: string; ValueName: ""; ValueData: "notepad.exe ""%1"""; Tasks: fileassoc
 
 ; Application Registration
