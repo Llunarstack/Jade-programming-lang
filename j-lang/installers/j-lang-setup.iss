@@ -91,6 +91,9 @@ Name: "quicklaunch"; Description: "Create a Quick Launch shortcut"; GroupDescrip
 ; Core executable
 Source: "..\dist\j-windows-x86_64.exe"; DestDir: "{app}"; DestName: "j.exe"; Flags: ignoreversion; Components: core
 
+; Icon file
+Source: "..\J_lang_logo.ico"; DestDir: "{app}"; Flags: ignoreversion; Components: core
+
 ; Standard Library
 Source: "..\lib\*"; DestDir: "{app}\lib"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: stdlib
 
@@ -106,22 +109,23 @@ Source: "..\..\CHANGELOG.md"; DestDir: "{app}"; DestName: "CHANGELOG.txt"; Flags
 
 [Icons]
 ; Start Menu
-Name: "{group}\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; Comment: "Start J Interactive REPL"
+Name: "{group}\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; Comment: "Start J Interactive REPL"; IconFilename: "{app}\J_lang_logo.ico"
 Name: "{group}\J Documentation"; Filename: "{app}\README.txt"; Comment: "View J Documentation"
 Name: "{group}\Example Programs"; Filename: "{app}\examples"; Comment: "Browse Example Programs"
 Name: "{group}\Standard Library"; Filename: "{app}\lib"; Comment: "Browse Standard Library"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"; Comment: "Uninstall J Programming Language"
 
 ; Desktop
-Name: "{autodesktop}\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; Comment: "Start J Interactive REPL"; Tasks: desktopicon
+Name: "{autodesktop}\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; Comment: "Start J Interactive REPL"; IconFilename: "{app}\J_lang_logo.ico"; Tasks: desktopicon
 
 ; Quick Launch
-Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; Tasks: quicklaunch
+Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; IconFilename: "{app}\J_lang_logo.ico"; Tasks: quicklaunch
 
 [Registry]
 ; File Association
 Root: HKA; Subkey: "Software\Classes\.j"; ValueType: string; ValueName: ""; ValueData: "JSourceFile"; Flags: uninsdeletevalue; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile"; ValueType: string; ValueName: ""; ValueData: "J Source File"; Flags: uninsdeletekey; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\J_lang_logo.ico,0"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" run ""%1"""; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit"; ValueType: string; ValueName: ""; ValueData: "Edit"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit\command"; ValueType: string; ValueName: ""; ValueData: "notepad.exe ""%1"""; Tasks: fileassoc
