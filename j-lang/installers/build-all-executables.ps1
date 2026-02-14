@@ -1,5 +1,5 @@
-# J Language - Build All Platform Executables
-# Builds executables for Windows, Linux, and macOS
+# J Language - Build All Executables
+# Builds release binaries for all supported platforms
 
 param(
     [switch]$SkipTests = $false
@@ -8,9 +8,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "  J Language - Multi-Platform Build Script" -ForegroundColor Cyan
-Write-Host "================================================" -ForegroundColor Cyan
+Write-Host "========================================================" -ForegroundColor Cyan
+Write-Host "  J Language - Multi-Platform Executable Builder" -ForegroundColor Cyan
+Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Configuration
@@ -22,106 +22,179 @@ if (-not (Test-Path $DistDir)) {
     New-Item -ItemType Directory -Path $DistDir | Out-Null
 }
 
-# Targets to build
-$Targets = @(
-    @{Name="Windows x64"; Target="x86_64-pc-windows-msvc"; Output="j-windows-x86_64.exe"; Extension=".exe"}
-    @{Name="Windows x86"; Target="i686-pc-windows-msvc"; Output="j-windows-i686.exe"; Extension=".exe"}
-    @{Name="Windows ARM64"; Target="aarch64-pc-windows-msvc"; Output="j-windows-aarch64.exe"; Extension=".exe"}
-    @{Name="Linux x64"; Target="x86_64-unknown-linux-gnu"; Output="j-linux-x86_64"; Extension=""}
-    @{Name="Linux x86"; Target="i686-unknown-linux-gnu"; Output="j-linux-i686"; Extension=""}
-    @{Name="Linux ARM64"; Target="aarch64-unknown-linux-gnu"; Output="j-linux-aarch64"; Extension=""}
-    @{Name="Linux ARMv7"; Target="armv7-unknown-linux-gnueabihf"; Output="j-linux-armv7"; Extension=""}
-    @{Name="macOS Intel"; Target="x86_64-apple-darwin"; Output="j-macos-x86_64"; Extension=""}
-    @{Name="macOS Apple Silicon"; Target="aarch64-apple-darwin"; Output="j-macos-aarch64"; Extension=""}
+# Check for Rust/Cargo
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+    Write-Host "❌ Cargo not found. Please install Rust from https://rustup.rs/" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "✅ Cargo found: $(cargo --version)" -ForegroundColor Green
+Write-Host ""
+
+# Run tests first (unless skipped)
+if (-not $SkipTests) {
+    Write-Host "🧪 Running tests..." -ForegroundColor Yellow
+    Push-Location $ProjectRoot
+    cargo test --release
+    Pop-Location
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "❌ Tests failed!" -ForegroundColor Red
+        exit 1
+    }
+    
+    Write-Host "✅ All tests passed" -ForegroundColor Green
+    Write-Host ""
+}
+
+# Define build targets
+$targets = @(
+    # Windows - Native builds
+    @{Name="windows-x86_64"; Target="x86_64-pc-windows-msvc"; Ext=".exe"; Native=$true},
+    @{Name="windows-i686"; Target="i686-pc-windows-msvc"; Ext=".exe"; Native=$true},
+    @{Name="windows-aarch64"; Target="aarch64-pc-windows-msvc"; Ext=".exe"; Native=$false},
+    
+    # Linux - Cross-compile
+    @{Name="linux-x86_64"; Target="x86_64-unknown-linux-gnu"; Ext=""; Native=$false},
+    @{Name="linux-i686"; Target="i686-unknown-linux-gnu"; Ext=""; Native=$false},
+    @{Name="linux-aarch64"; Target="aarch64-unknown-linux-gnu"; Ext=""; Native=$false},
+    @{Name="linux-armv7"; Target="armv7-unknown-linux-gnueabihf"; Ext=""; Native=$false},
+    
+    # macOS - Cross-compile
+    @{Name="macos-x86_64"; Target="x86_64-apple-darwin"; Ext=""; Native=$false},
+    @{Name="macos-aarch64"; Target="aarch64-apple-darwin"; Ext=""; Native=$false}
 )
 
-$BuiltCount = 0
-$FailedCount = 0
-$SkippedCount = 0
+Write-Host "📦 Building for $($targets.Count) platforms..." -ForegroundColor Green
+Write-Host ""
 
-foreach ($Target in $Targets) {
-    Write-Host ""
-    Write-Host "Building: $($Target.Name)" -ForegroundColor Yellow
-    Write-Host "Target: $($Target.Target)" -ForegroundColor Gray
+$successCount = 0
+$failCount = 0
+$results = @()
+
+foreach ($target in $targets) {
+    Write-Host "🔨 Building: $($target.Name) ($($target.Target))..." -ForegroundColor Yellow
     
-    # Check if target is installed
-    $TargetInstalled = rustup target list | Select-String $Target.Target | Select-String "installed"
-    
-    if (-not $TargetInstalled) {
-        Write-Host "Installing target..." -ForegroundColor Blue
-        try {
-            rustup target add $Target.Target 2>&1 | Out-Null
-        } catch {
-            Write-Host "Failed to install target: $($Target.Target)" -ForegroundColor Red
-            Write-Host "Skipping..." -ForegroundColor Yellow
-            $SkippedCount++
-            continue
-        }
-    }
+    # Add target
+    Write-Host "   Adding target..." -ForegroundColor Gray
+    rustup target add $target.Target 2>&1 | Out-Null
     
     # Build
-    Write-Host "Compiling..." -ForegroundColor Blue
+    Push-Location $ProjectRoot
+    
     try {
-        $BuildOutput = cargo build --release --target $Target.Target 2>&1
-        
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Build failed!" -ForegroundColor Red
-            Write-Host "Error: Linker or toolchain not available" -ForegroundColor Yellow
-            Write-Host "This is normal for cross-compilation on Windows" -ForegroundColor Gray
-            $FailedCount++
-            continue
-        }
-        
-        # Copy to dist
-        $SourcePath = Join-Path $ProjectRoot "target\$($Target.Target)\release\j$($Target.Extension)"
-        $DestPath = Join-Path $DistDir $Target.Output
-        
-        if (Test-Path $SourcePath) {
-            Copy-Item $SourcePath $DestPath -Force
-            $Size = [math]::Round((Get-Item $DestPath).Length / 1MB, 2)
-            Write-Host "SUCCESS! Built: $($Target.Output) ($Size MB)" -ForegroundColor Green
-            $BuiltCount++
+        if ($target.Native) {
+            # Native build with cargo
+            Write-Host "   Compiling (native)..." -ForegroundColor Gray
+            cargo build --release --target $target.Target 2>&1 | Out-Null
         } else {
-            Write-Host "Build succeeded but executable not found" -ForegroundColor Yellow
-            $FailedCount++
+            # Check for cross
+            if (-not (Get-Command cross -ErrorAction SilentlyContinue)) {
+                Write-Host "   ⚠️  Installing cross for cross-compilation..." -ForegroundColor Yellow
+                cargo install cross --git https://github.com/cross-rs/cross 2>&1 | Out-Null
+            }
+            
+            # Cross-compile
+            Write-Host "   Compiling (cross)..." -ForegroundColor Gray
+            cross build --release --target $target.Target 2>&1 | Out-Null
         }
         
+        # Check if build succeeded
+        $binaryPath = "target\$($target.Target)\release\j$($target.Ext)"
+        
+        if (Test-Path $binaryPath) {
+            # Copy to dist
+            $distPath = "$DistDir\j-$($target.Name)$($target.Ext)"
+            Copy-Item $binaryPath $distPath -Force
+            
+            # Get file size
+            $size = (Get-Item $distPath).Length / 1MB
+            
+            Write-Host "   ✅ Success! Size: $([math]::Round($size, 2)) MB" -ForegroundColor Green
+            $successCount++
+            $results += @{
+                Platform=$target.Name
+                Status="✅ Success"
+                Size="$([math]::Round($size, 2)) MB"
+                Path=$distPath
+            }
+        } else {
+            Write-Host "   ❌ Failed: Binary not found at $binaryPath" -ForegroundColor Red
+            $failCount++
+            $results += @{
+                Platform=$target.Name
+                Status="❌ Failed"
+                Size="N/A"
+                Path=""
+            }
+        }
     } catch {
-        Write-Host "Build failed: $_" -ForegroundColor Red
-        $FailedCount++
+        Write-Host "   ❌ Failed: $($_.Exception.Message)" -ForegroundColor Red
+        $failCount++
+        $results += @{
+            Platform=$target.Name
+            Status="❌ Failed"
+            Size="N/A"
+            Path=""
+        }
     }
+    
+    Pop-Location
+    Write-Host ""
+}
+
+# Generate checksums
+if ($successCount -gt 0) {
+    Write-Host "🔐 Generating SHA256 checksums..." -ForegroundColor Yellow
+    $checksumFile = Join-Path $DistDir "checksums.txt"
+    
+    "" | Out-File -FilePath $checksumFile -Encoding UTF8
+    "J Language v0.1.0 - SHA256 Checksums" | Out-File -Append -FilePath $checksumFile -Encoding UTF8
+    "Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -Append -FilePath $checksumFile -Encoding UTF8
+    "=" * 80 | Out-File -Append -FilePath $checksumFile -Encoding UTF8
+    "" | Out-File -Append -FilePath $checksumFile -Encoding UTF8
+    
+    Get-ChildItem $DistDir -Filter "j-*" | ForEach-Object {
+        $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+        "$hash  $($_.Name)" | Out-File -Append -FilePath $checksumFile -Encoding UTF8
+    }
+    
+    Write-Host "   ✅ Checksums saved to: checksums.txt" -ForegroundColor Green
+    Write-Host ""
 }
 
 # Summary
-Write-Host ""
-Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "  Build Summary" -ForegroundColor Cyan
-Write-Host "================================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Built: $BuiltCount" -ForegroundColor Green
-Write-Host "Failed: $FailedCount" -ForegroundColor $(if ($FailedCount -gt 0) { "Yellow" } else { "Gray" })
-Write-Host "Skipped: $SkippedCount" -ForegroundColor $(if ($SkippedCount -gt 0) { "Yellow" } else { "Gray" })
+Write-Host "========================================================" -ForegroundColor Cyan
+Write-Host "📊 Build Summary" -ForegroundColor Cyan
+Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# List built executables
-if ($BuiltCount -gt 0) {
-    Write-Host "Built Executables:" -ForegroundColor Cyan
-    Get-ChildItem $DistDir | Where-Object { $_.Name -like "j-*" } | ForEach-Object {
-        $Size = [math]::Round($_.Length / 1MB, 2)
-        Write-Host "  $($_.Name) - $Size MB" -ForegroundColor Green
-    }
-    Write-Host ""
+Write-Host "Platform                Status          Size" -ForegroundColor Cyan
+Write-Host "--------------------    -------------   --------" -ForegroundColor Gray
+
+foreach ($result in $results) {
+    $color = if ($result.Status -like "*Success*") { "Green" } else { "Red" }
+    $platform = $result.Platform.PadRight(20)
+    $status = $result.Status.PadRight(15)
+    $size = $result.Size
+    
+    Write-Host "$platform $status $size" -ForegroundColor $color
 }
 
-# Notes
-if ($FailedCount -gt 0 -or $SkippedCount -gt 0) {
-    Write-Host "Notes:" -ForegroundColor Yellow
-    Write-Host "  - Cross-compilation on Windows requires additional toolchains" -ForegroundColor Gray
-    Write-Host "  - Linux/macOS builds need native compilation or CI/CD" -ForegroundColor Gray
-    Write-Host "  - ARM64 Windows needs Visual Studio ARM64 tools" -ForegroundColor Gray
-    Write-Host "  - Use GitHub Actions for full multi-platform builds" -ForegroundColor Gray
-    Write-Host ""
+Write-Host ""
+Write-Host "Total: $successCount succeeded, $failCount failed" -ForegroundColor $(if ($failCount -eq 0) { "Green" } else { "Yellow" })
+Write-Host ""
+Write-Host "📁 Binaries saved to: $DistDir\" -ForegroundColor Cyan
+Write-Host ""
+
+if ($successCount -gt 0) {
+    Write-Host "✨ Build complete! Ready to create installers." -ForegroundColor Green
+} else {
+    Write-Host "⚠️  No binaries were built successfully." -ForegroundColor Yellow
 }
 
-Write-Host "Done!" -ForegroundColor Green
 Write-Host ""
+
+# Return success if at least one build succeeded
+exit $(if ($successCount -gt 0) { 0 } else { 1 })
