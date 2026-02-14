@@ -1,14 +1,8 @@
 # Rust
-j-lang/target/
-j-lang/Cargo.lock
+target/
+Cargo.lock
 **/*.rs.bk
 *.pdb
-
-# Build artifacts
-*.exe
-*.dll
-*.so
-*.dylib
 
 # IDE
 .vscode/
@@ -22,12 +16,13 @@ j-lang/Cargo.lock
 Thumbs.db
 desktop.ini
 
-# J language test files (temporary)
-j-lang/test_*.j
-j-lang/*.j
-!j-lang/examples/*.j
-!j-lang/demo.j
-!j-lang/main.j
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
 
 # Logs
 *.log
@@ -35,3 +30,12 @@ j-lang/*.j
 # Temporary files
 *.tmp
 *.temp
+.cache/
+
+# Package managers
+node_modules/
+package-lock.json
+
+# J language specific
+*.j.out
+.j_cache/
