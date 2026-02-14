@@ -124,9 +124,17 @@ Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\J REPL"; Filename:
 [Registry]
 ; File Association
 Root: HKA; Subkey: "Software\Classes\.j"; ValueType: string; ValueName: ""; ValueData: "JSourceFile"; Flags: uninsdeletevalue; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\.j"; ValueType: string; ValueName: "Content Type"; ValueData: "text/plain"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\.j"; ValueType: string; ValueName: "PerceivedType"; ValueData: "text"; Tasks: fileassoc
+
 Root: HKA; Subkey: "Software\Classes\JSourceFile"; ValueType: string; ValueName: ""; ValueData: "J Source File"; Flags: uninsdeletekey; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "J Source File"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\J_lang.ico,0"; Tasks: fileassoc
+
+Root: HKA; Subkey: "Software\Classes\JSourceFile\shell"; ValueType: string; ValueName: ""; ValueData: "open"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\open"; ValueType: string; ValueName: ""; ValueData: "Run with J"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" run ""%1"""; Tasks: fileassoc
+
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit"; ValueType: string; ValueName: ""; ValueData: "Edit"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit\command"; ValueType: string; ValueName: ""; ValueData: "notepad.exe ""%1"""; Tasks: fileassoc
 
@@ -257,6 +265,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   AppPath: string;
   AllUsers: Boolean;
+  ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -269,6 +278,23 @@ begin
       ProgressPage.Show;
       try
         AddToPath(AppPath, AllUsers);
+      finally
+        ProgressPage.Hide;
+      end;
+    end;
+    
+    // Refresh icon cache and file associations
+    if WizardIsTaskSelected('fileassoc') then
+    begin
+      ProgressPage.SetText('Refreshing file associations...', '');
+      ProgressPage.Show;
+      try
+        // Notify Windows of file association changes
+        Exec('cmd.exe', '/c assoc .j=JSourceFile', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Exec('cmd.exe', '/c ftype JSourceFile="' + ExpandConstant('{app}\{#MyAppExeName}') + '" run "%1"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        
+        // Refresh icon cache
+        Exec('ie4uinit.exe', '-show', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       finally
         ProgressPage.Hide;
       end;
