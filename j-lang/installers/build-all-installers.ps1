@@ -61,6 +61,7 @@ $windowsInstallers = @()
 # Check for Inno Setup
 $InnoSetupPath = $null
 $InnoLocations = @(
+    "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe",

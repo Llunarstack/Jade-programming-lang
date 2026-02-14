@@ -22,7 +22,6 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\dist\installers
 OutputBaseFilename=j-lang-{#MyAppVersion}-windows-setup
-SetupIconFile=..\J_lang_logo.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -33,10 +32,6 @@ ArchitecturesAllowed=x86 x64compatible arm64
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
-; Visual
-WizardImageFile=compiler:WizModernImage-IS.bmp
-WizardSmallImageFile=compiler:WizModernSmallImage-IS.bmp
-
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
@@ -46,16 +41,12 @@ Name: "addtopath"; Description: "Add J to system PATH (recommended)"; GroupDescr
 Name: "fileassoc"; Description: "Associate .j files with J"; GroupDescription: "System Integration:"; Flags: checkedonce
 
 [Files]
-; Main executable - try multiple locations
+; Main executable
 Source: "..\dist\j-windows-x86_64.exe"; DestDir: "{app}"; DestName: "j.exe"; Flags: ignoreversion; Check: Is64BitInstallMode
-Source: "..\dist\j-windows-i686.exe"; DestDir: "{app}"; DestName: "j.exe"; Flags: ignoreversion; Check: not Is64BitInstallMode
-Source: "..\target\release\j.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: not FileExists(ExpandConstant('{app}\j.exe'))
+Source: "..\target\release\j.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: not Is64BitInstallMode
 
 ; Examples
 Source: "..\examples\*"; DestDir: "{app}\examples"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-; Icon
-Source: "..\J_lang_logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Documentation
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
@@ -78,162 +69,62 @@ Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit"; ValueType: string;
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit\command"; ValueType: string; ValueName: ""; ValueData: "notepad.exe ""%1"""; Tasks: fileassoc
 
 [Code]
+procedure CurStepChanged(CurStep: TSetupStep);
 var
-  PathModified: Boolean;
-
-procedure AddToPath();
-var
-  OldPath, NewPath, AppPath: string;
-  PathArr: TArrayOfString;
-  i: Integer;
-  Found: Boolean;
+  AppPath, OldPath: string;
 begin
-  AppPath := ExpandConstant('{app}');
-  
-  if IsAdminInstallMode then
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('addtopath') then
   begin
-    // System PATH
-    if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OldPath) then
-    begin
-      // Check if already in path
-      Found := False;
-      PathArr := SplitString(OldPath, ';');
-      for i := 0 to GetArrayLength(PathArr) - 1 do
-      begin
-        if CompareText(PathArr[i], AppPath) = 0 then
-        begin
-          Found := True;
-          Break;
-        end;
-      end;
-      
-      if not Found then
-      begin
-        NewPath := OldPath;
-        if Length(NewPath) > 0 then
-          NewPath := NewPath + ';';
-        NewPath := NewPath + AppPath;
-        
-        if RegWriteExpandStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', NewPath) then
-          PathModified := True;
-      end;
-    end;
-  end
-  else
-  begin
-    // User PATH
+    AppPath := ExpandConstant('{app}');
+    
+    // Add to user PATH
     if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OldPath) then
     begin
-      // Check if already in path
-      Found := False;
-      PathArr := SplitString(OldPath, ';');
-      for i := 0 to GetArrayLength(PathArr) - 1 do
+      if Pos(AppPath, OldPath) = 0 then
       begin
-        if CompareText(PathArr[i], AppPath) = 0 then
-        begin
-          Found := True;
-          Break;
-        end;
-      end;
-      
-      if not Found then
-      begin
-        NewPath := OldPath;
-        if Length(NewPath) > 0 then
-          NewPath := NewPath + ';';
-        NewPath := NewPath + AppPath;
-        
-        if RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPath) then
-          PathModified := True;
+        if OldPath <> '' then
+          OldPath := OldPath + ';';
+        RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OldPath + AppPath);
       end;
     end
     else
     begin
-      // Create new PATH
-      if RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', AppPath) then
-        PathModified := True;
-    end;
-  end;
-end;
-
-procedure RemoveFromPath();
-var
-  OldPath, NewPath, AppPath: string;
-  PathArr: TArrayOfString;
-  i: Integer;
-begin
-  AppPath := ExpandConstant('{app}');
-  
-  if IsAdminInstallMode then
-  begin
-    if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OldPath) then
-    begin
-      NewPath := '';
-      PathArr := SplitString(OldPath, ';');
-      for i := 0 to GetArrayLength(PathArr) - 1 do
-      begin
-        if CompareText(PathArr[i], AppPath) <> 0 then
-        begin
-          if Length(NewPath) > 0 then
-            NewPath := NewPath + ';';
-          NewPath := NewPath + PathArr[i];
-        end;
-      end;
-      RegWriteExpandStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', NewPath);
-    end;
-  end
-  else
-  begin
-    if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OldPath) then
-    begin
-      NewPath := '';
-      PathArr := SplitString(OldPath, ';');
-      for i := 0 to GetArrayLength(PathArr) - 1 do
-      begin
-        if CompareText(PathArr[i], AppPath) <> 0 then
-        begin
-          if Length(NewPath) > 0 then
-            NewPath := NewPath + ';';
-          NewPath := NewPath + PathArr[i];
-        end;
-      end;
-      RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPath);
-    end;
-  end;
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-  begin
-    PathModified := False;
-    
-    if WizardIsTaskSelected('addtopath') then
-    begin
-      AddToPath();
+      RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', AppPath);
     end;
   end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  AppPath, OldPath, NewPath: string;
+  P: Integer;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    RemoveFromPath();
-  end;
-end;
-
-function InitializeSetup(): Boolean;
-begin
-  Result := True;
-end;
-
-procedure DeinitializeSetup();
-begin
-  if PathModified then
-  begin
-    // Notify system of environment change
-    SendBroadcastMessage(WM_SETTINGCHANGE, 0, CastStringToInteger('Environment'));
+    AppPath := ExpandConstant('{app}');
+    
+    if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OldPath) then
+    begin
+      P := Pos(';' + AppPath, OldPath);
+      if P > 0 then
+      begin
+        NewPath := Copy(OldPath, 1, P - 1) + Copy(OldPath, P + Length(AppPath) + 1, Length(OldPath));
+        RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPath);
+      end
+      else
+      begin
+        P := Pos(AppPath + ';', OldPath);
+        if P > 0 then
+        begin
+          NewPath := Copy(OldPath, 1, P - 1) + Copy(OldPath, P + Length(AppPath) + 1, Length(OldPath));
+          RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPath);
+        end
+        else if OldPath = AppPath then
+        begin
+          RegDeleteValue(HKEY_CURRENT_USER, 'Environment', 'Path');
+        end;
+      end;
+    end;
   end;
 end;
 
