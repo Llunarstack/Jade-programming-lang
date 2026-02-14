@@ -4,7 +4,7 @@
 #define MyAppName "J Programming Language"
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "J Language Team"
-#define MyAppURL "https://github.com/j-lang/j"
+#define MyAppURL "https://github.com/Llunarstack/j"
 #define MyAppExeName "j.exe"
 
 [Setup]
@@ -18,15 +18,19 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\J
+DisableDirPage=no
 DefaultGroupName={#MyAppName}
+DisableProgramGroupPage=no
 AllowNoIcons=yes
+LicenseFile=..\..\LICENSE
 OutputDir=..\dist\installers
 OutputBaseFilename=j-lang-{#MyAppVersion}-windows-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
-ArchitecturesAllowed=x86 x64compatible arm64
+ArchitecturesAllowed=x64compatible
+UninstallDisplayIcon={app}\{#MyAppExeName}
 
 ; Privileges
 PrivilegesRequired=lowest
@@ -42,30 +46,29 @@ Name: "fileassoc"; Description: "Associate .j files with J"; GroupDescription: "
 
 [Files]
 ; Main executable
-Source: "..\dist\j-windows-x86_64.exe"; DestDir: "{app}"; DestName: "j.exe"; Flags: ignoreversion; Check: Is64BitInstallMode
-Source: "..\target\release\j.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: not Is64BitInstallMode
+Source: "..\dist\j-windows-x86_64.exe"; DestDir: "{app}"; DestName: "j.exe"; Flags: ignoreversion
 
 ; Examples
-Source: "..\examples\*"; DestDir: "{app}\examples"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\examples\*.j"; DestDir: "{app}\examples"; Flags: ignoreversion
 
 ; Documentation
-Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
-Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion; Check: not FileExists(ExpandConstant('{app}\README.md'))
+Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
+Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\CONTRIBUTING.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; IconFilename: "{app}\J_lang_logo.ico"
+Name: "{group}\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"
 Name: "{group}\J Documentation"; Filename: "{app}\README.md"
 Name: "{group}\Examples"; Filename: "{app}\examples"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; IconFilename: "{app}\J_lang_logo.ico"; Tasks: desktopicon
+Name: "{autodesktop}\J REPL"; Filename: "{app}\{#MyAppExeName}"; Parameters: "repl"; Tasks: desktopicon
 
 [Registry]
 ; File association
 Root: HKA; Subkey: "Software\Classes\.j"; ValueType: string; ValueName: ""; ValueData: "JSourceFile"; Flags: uninsdeletevalue; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile"; ValueType: string; ValueName: ""; ValueData: "J Source File"; Flags: uninsdeletekey; Tasks: fileassoc
-Root: HKA; Subkey: "Software\Classes\JSourceFile\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\J_lang_logo.ico"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" run ""%1"""; Tasks: fileassoc
-Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit"; ValueType: string; ValueName: ""; ValueData: "Edit with Notepad"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit"; ValueType: string; ValueName: ""; ValueData: "Edit"; Tasks: fileassoc
 Root: HKA; Subkey: "Software\Classes\JSourceFile\shell\edit\command"; ValueType: string; ValueName: ""; ValueData: "notepad.exe ""%1"""; Tasks: fileassoc
 
 [Code]
