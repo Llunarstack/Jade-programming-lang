@@ -8695,6 +8695,39 @@ impl Interpreter {
                 Ok(Value::String(json_str))
             }
             
+            // 🦆 SECRET EASTER EGG - Not documented anywhere!
+            // Only activates with exact parameters, otherwise silently returns None
+            "quack_check" => {
+                if args.len() != 3 {
+                    return Ok(Value::None); // Silent fail
+                }
+                
+                let sound = self.eval_node(&args[0])?;
+                let num = self.eval_node(&args[1])?;
+                let ducks = self.eval_node(&args[2])?;
+                
+                // Check if all conditions match exactly
+                let sound_match = matches!(sound, Value::String(ref s) if s == "quack");
+                let num_match = matches!(num, Value::Integer(4));
+                let ducks_match = if let Value::List(ref list) = ducks {
+                    list.len() == 4 && list.iter().all(|v| matches!(v, Value::String(ref s) if s == "quack"))
+                } else {
+                    false
+                };
+                
+                if sound_match && num_match && ducks_match {
+                    // 🎉 Easter egg activated!
+                    println!("Ethan likes ducks!");
+                    println!("     __");
+                    println!("   <(o )___");
+                    println!("    ( _ > /");
+                    println!("     `---'  ");
+                }
+                
+                // Always return None, no indication whether it worked or not
+                Ok(Value::None)
+            }
+            
             _ => { // If not built-in, look for user-defined function (or @once/MirrorDispatch wrapper)
                 let func_val = self.get_variable(name)?;
                 let eval_args: Vec<Value> = args.iter().map(|a| self.eval_node(a)).collect::<Result<Vec<_>, _>>()?;
