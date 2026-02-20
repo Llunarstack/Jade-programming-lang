@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoltManifest {
@@ -76,7 +76,7 @@ impl JoltManager {
 
     pub fn init_project(&self, path: &Path, name: Option<String>) -> Result<(), String> {
         let manifest_path = path.join("jolt.toml");
-        
+
         if manifest_path.exists() {
             return Err("Project already initialized (jolt.toml exists)".to_string());
         }
@@ -89,8 +89,10 @@ impl JoltManager {
         }
 
         // Create directories
-        fs::create_dir_all(path).map_err(|e| format!("Failed to create project directory: {}", e))?;
-        fs::create_dir_all(path.join("src")).map_err(|e| format!("Failed to create src directory: {}", e))?;
+        fs::create_dir_all(path)
+            .map_err(|e| format!("Failed to create project directory: {}", e))?;
+        fs::create_dir_all(path.join("src"))
+            .map_err(|e| format!("Failed to create src directory: {}", e))?;
 
         // Write manifest
         let toml_content = toml::to_string_pretty(&manifest)
@@ -101,8 +103,11 @@ impl JoltManager {
         // Create main.j file
         let main_file = path.join("main.j");
         if !main_file.exists() {
-            fs::write(&main_file, "# Welcome to your new J project!\nout(\"Hello, World!\")\n")
-                .map_err(|e| format!("Failed to create main.j: {}", e))?;
+            fs::write(
+                &main_file,
+                "# Welcome to your new J project!\nout(\"Hello, World!\")\n",
+            )
+            .map_err(|e| format!("Failed to create main.j: {}", e))?;
         }
 
         // Create README.md
@@ -116,7 +121,11 @@ impl JoltManager {
                 .map_err(|e| format!("Failed to create README.md: {}", e))?;
         }
 
-        println!("✅ Initialized J project '{}' in {}", manifest.name, path.display());
+        println!(
+            "✅ Initialized J project '{}' in {}",
+            manifest.name,
+            path.display()
+        );
         Ok(())
     }
 
@@ -150,9 +159,14 @@ impl JoltManager {
         Ok(())
     }
 
-    pub fn add_dependency(&self, project_path: &Path, name: &str, version: Option<&str>) -> Result<(), String> {
+    pub fn add_dependency(
+        &self,
+        project_path: &Path,
+        name: &str,
+        version: Option<&str>,
+    ) -> Result<(), String> {
         let manifest_path = project_path.join("jolt.toml");
-        
+
         if !manifest_path.exists() {
             return Err("No jolt.toml found. Run 'jolt init' first.".to_string());
         }
@@ -160,13 +174,15 @@ impl JoltManager {
         // Read existing manifest
         let manifest_content = fs::read_to_string(&manifest_path)
             .map_err(|e| format!("Failed to read jolt.toml: {}", e))?;
-        
+
         let mut manifest: JoltManifest = toml::from_str(&manifest_content)
             .map_err(|e| format!("Failed to parse jolt.toml: {}", e))?;
 
         // Add dependency
         let version = version.unwrap_or("^0.1.0");
-        manifest.dependencies.insert(name.to_string(), version.to_string());
+        manifest
+            .dependencies
+            .insert(name.to_string(), version.to_string());
 
         // Write updated manifest
         let updated_content = toml::to_string_pretty(&manifest)
@@ -183,7 +199,7 @@ impl JoltManager {
 
     pub fn remove_dependency(&self, project_path: &Path, name: &str) -> Result<(), String> {
         let manifest_path = project_path.join("jolt.toml");
-        
+
         if !manifest_path.exists() {
             return Err("No jolt.toml found.".to_string());
         }
@@ -191,7 +207,7 @@ impl JoltManager {
         // Read existing manifest
         let manifest_content = fs::read_to_string(&manifest_path)
             .map_err(|e| format!("Failed to read jolt.toml: {}", e))?;
-        
+
         let mut manifest: JoltManifest = toml::from_str(&manifest_content)
             .map_err(|e| format!("Failed to parse jolt.toml: {}", e))?;
 
@@ -212,14 +228,14 @@ impl JoltManager {
 
     pub fn list_dependencies(&self, project_path: &Path) -> Result<(), String> {
         let manifest_path = project_path.join("jolt.toml");
-        
+
         if !manifest_path.exists() {
             return Err("No jolt.toml found.".to_string());
         }
 
         let manifest_content = fs::read_to_string(&manifest_path)
             .map_err(|e| format!("Failed to read jolt.toml: {}", e))?;
-        
+
         let manifest: JoltManifest = toml::from_str(&manifest_content)
             .map_err(|e| format!("Failed to parse jolt.toml: {}", e))?;
 
@@ -244,20 +260,20 @@ impl JoltManager {
 
     pub fn run_script(&self, project_path: &Path, script_name: &str) -> Result<(), String> {
         let manifest_path = project_path.join("jolt.toml");
-        
+
         if !manifest_path.exists() {
             return Err("No jolt.toml found.".to_string());
         }
 
         let manifest_content = fs::read_to_string(&manifest_path)
             .map_err(|e| format!("Failed to read jolt.toml: {}", e))?;
-        
+
         let manifest: JoltManifest = toml::from_str(&manifest_content)
             .map_err(|e| format!("Failed to parse jolt.toml: {}", e))?;
 
         if let Some(script_command) = manifest.scripts.get(script_name) {
             println!("🚀 Running script '{}': {}", script_name, script_command);
-            
+
             // Execute the script command
             let output = std::process::Command::new("sh")
                 .arg("-c")
@@ -271,7 +287,11 @@ impl JoltManager {
                 Ok(())
             } else {
                 eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-                Err(format!("Script '{}' failed with exit code: {:?}", script_name, output.status.code()))
+                Err(format!(
+                    "Script '{}' failed with exit code: {:?}",
+                    script_name,
+                    output.status.code()
+                ))
             }
         } else {
             Err(format!("Script '{}' not found in jolt.toml", script_name))
@@ -280,29 +300,35 @@ impl JoltManager {
 
     pub fn publish(&self, project_path: &Path) -> Result<(), String> {
         let manifest_path = project_path.join("jolt.toml");
-        
+
         if !manifest_path.exists() {
             return Err("No jolt.toml found.".to_string());
         }
 
         let manifest_content = fs::read_to_string(&manifest_path)
             .map_err(|e| format!("Failed to read jolt.toml: {}", e))?;
-        
+
         let manifest: JoltManifest = toml::from_str(&manifest_content)
             .map_err(|e| format!("Failed to parse jolt.toml: {}", e))?;
 
-        println!("📤 Publishing {} @ {} to registry...", manifest.name, manifest.version);
-        
+        println!(
+            "📤 Publishing {} @ {} to registry...",
+            manifest.name, manifest.version
+        );
+
         // TODO: Implement actual publishing to registry
         // For now, just simulate it
-        println!("✅ Published {} @ {} successfully!", manifest.name, manifest.version);
-        
+        println!(
+            "✅ Published {} @ {} successfully!",
+            manifest.name, manifest.version
+        );
+
         Ok(())
     }
 
     pub fn search(&self, query: &str) -> Result<(), String> {
         println!("🔍 Searching for packages matching '{}'...", query);
-        
+
         // TODO: Implement actual registry search
         // For now, show some dummy results
         let dummy_results = vec![
@@ -323,7 +349,7 @@ impl JoltManager {
 
     pub fn info(&self, package_name: &str) -> Result<(), String> {
         println!("📋 Package information for '{}':", package_name);
-        
+
         // TODO: Fetch actual package info from registry
         // For now, show dummy info
         println!("  Name: {}", package_name);
@@ -333,7 +359,7 @@ impl JoltManager {
         println!("  License: MIT");
         println!("  Homepage: https://github.com/j-lang/{}", package_name);
         println!("  Downloads: 1,234");
-        
+
         Ok(())
     }
 }

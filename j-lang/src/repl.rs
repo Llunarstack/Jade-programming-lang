@@ -1,7 +1,7 @@
-use std::io::{self, Write};
+use crate::interpreter::Interpreter;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::interpreter::Interpreter;
+use std::io::{self, Write};
 
 pub struct Repl {
     interpreter: Interpreter,
@@ -15,21 +15,21 @@ impl Repl {
             history: Vec::new(),
         }
     }
-    
+
     pub fn run(&mut self) {
         loop {
             print!("j> ");
             io::stdout().flush().unwrap();
-            
+
             let mut input = String::new();
             match io::stdin().read_line(&mut input) {
                 Ok(_) => {
                     let input = input.trim();
-                    
+
                     if input.is_empty() {
                         continue;
                     }
-                    
+
                     match input {
                         "exit" | "quit" => {
                             println!("👋 Goodbye!");
@@ -49,9 +49,9 @@ impl Repl {
                         }
                         _ => {}
                     }
-                    
+
                     self.history.push(input.to_string());
-                    
+
                     match self.evaluate(input) {
                         Ok(result) => {
                             if !result.is_empty() {
@@ -70,25 +70,27 @@ impl Repl {
             }
         }
     }
-    
+
     fn evaluate(&mut self, input: &str) -> Result<String, String> {
         // Tokenize
         let mut lexer = Lexer::new(input);
-        let tokens = lexer.tokenize()
+        let tokens = lexer
+            .tokenize()
             .map_err(|e| format!("Lexer error: {}", e))?;
-        
+
         // Parse
         let mut parser = Parser::new(tokens);
-        let ast = parser.parse()
-            .map_err(|e| format!("Parser error: {}", e))?;
-        
+        let ast = parser.parse().map_err(|e| format!("Parser error: {}", e))?;
+
         // Interpret
-        let result = self.interpreter.evaluate(&ast)
+        let result = self
+            .interpreter
+            .evaluate(&ast)
             .map_err(|e| format!("Runtime error: {}", e))?;
-        
+
         Ok(result)
     }
-    
+
     fn show_help(&self) {
         println!("🚀 J Language REPL Commands:");
         println!("  help     - Show this help message");
@@ -110,13 +112,13 @@ impl Repl {
         println!("  in nums : out(_ * 2)");
         println!("  j; -> test.j              # Execute another J file");
     }
-    
+
     fn show_history(&self) {
         if self.history.is_empty() {
             println!("📝 No command history");
             return;
         }
-        
+
         println!("📝 Command History:");
         for (i, cmd) in self.history.iter().enumerate() {
             println!("  {}: {}", i + 1, cmd);

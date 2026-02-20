@@ -23,6 +23,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
 dirs = "5.0"
+# Cryptography dependencies
+sha2 = "0.10"
+hmac = "0.12"
+rand = "0.8"
+uuid = { version = "1.0", features = ["v4"] }
+base64 = "0.21"
 # LLVM dependencies for compilation (optional)
 inkwell = { version = "0.4", features = ["llvm10-0"], optional = true }
 # JIT dependencies (optional)

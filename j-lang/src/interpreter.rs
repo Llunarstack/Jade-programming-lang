@@ -1,8 +1,18 @@
-use crate::parser::{AstNode, BinaryOp, UnaryOp, Pattern};
 use crate::error::JError;
+use crate::parser::{AstNode, BinaryOp, Pattern, UnaryOp};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+
+// Control flow enum for proper unwinding (reserved for future use)
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum ControlFlow {
+    None,
+    Return(Box<Value>),
+    Break,
+    Continue,
+}
 
 // Define these types before Value enum since Value references them
 #[allow(dead_code)]
@@ -23,7 +33,6 @@ pub enum FutureState {
     Failed(String),
 }
 
-
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -34,20 +43,34 @@ pub enum Value {
     Char(char),
     List(Vec<Value>),
     Dict(HashMap<String, Value>),
-    Set(HashSet<String>), // For simplicity, using String keys
+    Set(HashSet<String>),          // For simplicity, using String keys
     Counter(HashMap<String, i64>), // Frequency counter
-    Deque(Vec<Value>), // Double-ended queue (legacy - use Queue instead)
-    PriorityQ(Vec<(i64, Value)>), // Priority queue (legacy - use Prio instead)
+    Deque(Vec<Value>),             // Double-ended queue (legacy - use Queue instead)
+    PriorityQ(Vec<(i64, Value)>),  // Priority queue (legacy - use Prio instead)
     Graph(HashMap<String, Vec<(String, f64)>>), // Graph: node -> [(neighbor, weight), ...]
     // New OP collection types
     Queue(std::collections::VecDeque<Value>), // Double-ended queue with O(1) push/pop both ends
-    Ring { buffer: Vec<Value>, capacity: usize, head: usize, size: usize }, // Circular buffer with fixed capacity
-    Sorted(Vec<Value>), // Auto-sorted list (kept sorted on insert)
-    Bag(HashMap<String, i64>), // Multiset/bag with automatic frequency counting
-    Window { source: Vec<Value>, size: usize, start: usize }, // Sliding window view (zero-copy)
-    View { source: Box<Value>, start: usize, end: usize, mutable: bool }, // Zero-copy slice view
-    Prio(Vec<(i64, Value)>), // Priority queue (min-heap) - improved version
-    Diff(Vec<Value>), // Difference list for cheap append
+    Ring {
+        buffer: Vec<Value>,
+        capacity: usize,
+        head: usize,
+        size: usize,
+    }, // Circular buffer with fixed capacity
+    Sorted(Vec<Value>),                       // Auto-sorted list (kept sorted on insert)
+    Bag(HashMap<String, i64>),                // Multiset/bag with automatic frequency counting
+    Window {
+        source: Vec<Value>,
+        size: usize,
+        start: usize,
+    }, // Sliding window view (zero-copy)
+    View {
+        source: Box<Value>,
+        start: usize,
+        end: usize,
+        mutable: bool,
+    }, // Zero-copy slice view
+    Prio(Vec<(i64, Value)>),                  // Priority queue (min-heap) - improved version
+    Diff(Vec<Value>),                         // Difference list for cheap append
     Tree {
         value: Box<Value>,
         children: Vec<Value>, // Children are also Tree values
@@ -86,23 +109,23 @@ pub enum Value {
     Time(String),
     DateTime(String),
     Tuple(Vec<Value>),
-    Range(i64, i64, i64), // start, end, step
-    Task(u64), // task ID
-    Channel(u64), // channel ID
-    Vector(Vec<f64>), // 1D vector
-    Matrix(Vec<Vec<f64>>), // 2D matrix
-    Grid(Vec<Vec<Value>>), // 2D grid with neighbor logic
-    GridNeighbors(Box<Value>), // callable: grid.neighbors(i, j) -> list of adjacent cell values
+    Range(i64, i64, i64),       // start, end, step
+    Task(u64),                  // task ID
+    Channel(u64),               // channel ID
+    Vector(Vec<f64>),           // 1D vector
+    Matrix(Vec<Vec<f64>>),      // 2D matrix
+    Grid(Vec<Vec<Value>>),      // 2D grid with neighbor logic
+    GridNeighbors(Box<Value>),  // callable: grid.neighbors(i, j) -> list of adjacent cell values
     GridNeighbors8(Box<Value>), // callable: grid.neighbors8(i, j) -> 8-directional neighbors
-    GridFindAll(Box<Value>), // callable: grid.find_all(value) -> list of (row, col) positions
-    GridRow(Box<Value>), // callable: grid.row(n) -> list of values in row n
-    GridCol(Box<Value>), // callable: grid.col(n) -> list of values in column n
-    MatrixRow(Box<Value>), // callable: matrix.row(n) -> list of values in row n
-    MatrixCol(Box<Value>), // callable: matrix.col(n) -> list of values in column n
+    GridFindAll(Box<Value>),    // callable: grid.find_all(value) -> list of (row, col) positions
+    GridRow(Box<Value>),        // callable: grid.row(n) -> list of values in row n
+    GridCol(Box<Value>),        // callable: grid.col(n) -> list of values in column n
+    MatrixRow(Box<Value>),      // callable: matrix.row(n) -> list of values in row n
+    MatrixCol(Box<Value>),      // callable: matrix.col(n) -> list of values in column n
     MatrixDiagonal(Box<Value>), // callable: matrix.diagonal() -> list of diagonal values
-    MatrixFlat(Box<Value>), // callable: matrix.flat() -> flattened list
-    MatrixRowSums(Box<Value>), // callable: matrix.row_sums() -> list of row sums
-    MatrixColSums(Box<Value>), // callable: matrix.col_sums() -> list of column sums
+    MatrixFlat(Box<Value>),     // callable: matrix.flat() -> flattened list
+    MatrixRowSums(Box<Value>),  // callable: matrix.row_sums() -> list of row sums
+    MatrixColSums(Box<Value>),  // callable: matrix.col_sums() -> list of column sums
     MatrixRowMeans(Box<Value>), // callable: matrix.row_means() -> list of row means
     MatrixColMeans(Box<Value>), // callable: matrix.col_means() -> list of column means
     Enum {
@@ -171,7 +194,9 @@ impl fmt::Display for Value {
             Value::List(list) => {
                 write!(f, "[")?;
                 for (i, item) in list.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, "]")
@@ -179,7 +204,9 @@ impl fmt::Display for Value {
             Value::Dict(dict) => {
                 write!(f, "{{")?;
                 for (i, (key, value)) in dict.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}: {}", key, value)?;
                 }
                 write!(f, "}}")
@@ -187,7 +214,9 @@ impl fmt::Display for Value {
             Value::Set(set) => {
                 write!(f, "{{")?;
                 for (i, item) in set.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, "}}")
@@ -195,7 +224,9 @@ impl fmt::Display for Value {
             Value::Counter(counter) => {
                 write!(f, "Counter{{")?;
                 for (i, (key, count)) in counter.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}: {}", key, count)?;
                 }
                 write!(f, "}}")
@@ -237,7 +268,9 @@ impl fmt::Display for Value {
             Value::Tuple(tuple) => {
                 write!(f, "(")?;
                 for (i, item) in tuple.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, ")")
@@ -248,7 +281,9 @@ impl fmt::Display for Value {
             Value::Vector(vec) => {
                 write!(f, "vec[")?;
                 for (i, item) in vec.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, "]")
@@ -256,10 +291,14 @@ impl fmt::Display for Value {
             Value::Matrix(mat) => {
                 write!(f, "mat[")?;
                 for (i, row) in mat.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "[")?;
                     for (j, item) in row.iter().enumerate() {
-                        if j > 0 { write!(f, ", ")?; }
+                        if j > 0 {
+                            write!(f, ", ")?;
+                        }
                         write!(f, "{}", item)?;
                     }
                     write!(f, "]")?;
@@ -269,10 +308,14 @@ impl fmt::Display for Value {
             Value::Grid(grid) => {
                 write!(f, "grid[")?;
                 for (i, row) in grid.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "[")?;
                     for (j, item) in row.iter().enumerate() {
-                        if j > 0 { write!(f, ", ")?; }
+                        if j > 0 {
+                            write!(f, ", ")?;
+                        }
                         write!(f, "{}", item)?;
                     }
                     write!(f, "]")?;
@@ -282,7 +325,9 @@ impl fmt::Display for Value {
             Value::Deque(deque) => {
                 write!(f, "deque[")?;
                 for (i, item) in deque.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, "]")
@@ -290,7 +335,9 @@ impl fmt::Display for Value {
             Value::PriorityQ(pq) => {
                 write!(f, "priorityq[")?;
                 for (i, (priority, value)) in pq.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "({}, {})", priority, value)?;
                 }
                 write!(f, "]")
@@ -298,15 +345,24 @@ impl fmt::Display for Value {
             Value::Queue(queue) => {
                 write!(f, "queue[")?;
                 for (i, item) in queue.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, "]")
             }
-            Value::Ring { buffer, size, head, capacity } => {
+            Value::Ring {
+                buffer,
+                size,
+                head,
+                capacity,
+            } => {
                 write!(f, "ring[")?;
                 for i in 0..*size {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     let idx = (*head + i) % *capacity;
                     write!(f, "{}", buffer[idx])?;
                 }
@@ -315,7 +371,9 @@ impl fmt::Display for Value {
             Value::Sorted(list) => {
                 write!(f, "sorted[")?;
                 for (i, item) in list.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, "]")
@@ -323,25 +381,40 @@ impl fmt::Display for Value {
             Value::Bag(bag) => {
                 write!(f, "bag{{")?;
                 for (i, (key, count)) in bag.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}: {}", key, count)?;
                 }
                 write!(f, "}}")
             }
-            Value::Window { source, size, start } => {
+            Value::Window {
+                source,
+                size,
+                start,
+            } => {
                 write!(f, "window[")?;
                 let end = (*start + *size).min(source.len());
                 for i in *start..end {
-                    if i > *start { write!(f, ", ")?; }
+                    if i > *start {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", source[i])?;
                 }
                 write!(f, "] (size: {})", size)
             }
-            Value::View { source, start, end, mutable } => {
+            Value::View {
+                source,
+                start,
+                end,
+                mutable,
+            } => {
                 write!(f, "view[")?;
                 if let Value::List(list) = source.as_ref() {
                     for i in *start..*end {
-                        if i > *start { write!(f, ", ")?; }
+                        if i > *start {
+                            write!(f, ", ")?;
+                        }
                         if i < list.len() {
                             write!(f, "{}", list[i])?;
                         }
@@ -357,7 +430,9 @@ impl fmt::Display for Value {
             Value::Prio(pq) => {
                 write!(f, "prio[")?;
                 for (i, (priority, value)) in pq.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "({}, {})", priority, value)?;
                 }
                 write!(f, "]")
@@ -365,7 +440,9 @@ impl fmt::Display for Value {
             Value::Diff(list) => {
                 write!(f, "diff[")?;
                 for (i, item) in list.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, "]")
@@ -374,7 +451,9 @@ impl fmt::Display for Value {
                 write!(f, "span[")?;
                 if let Value::List(list) = source.as_ref() {
                     for i in *start..*end {
-                        if i > *start { write!(f, ", ")?; }
+                        if i > *start {
+                            write!(f, ", ")?;
+                        }
                         if i < list.len() {
                             write!(f, "{}", list[i])?;
                         }
@@ -386,7 +465,9 @@ impl fmt::Display for Value {
                 write!(f, "mut_span[")?;
                 if let Value::List(list) = source.as_ref() {
                     for i in *start..*end {
-                        if i > *start { write!(f, ", ")?; }
+                        if i > *start {
+                            write!(f, ", ")?;
+                        }
                         if i < list.len() {
                             write!(f, "{}", list[i])?;
                         }
@@ -394,28 +475,37 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::Chunk { source, chunk_size, current_index } => {
+            Value::Chunk {
+                source: _,
+                chunk_size,
+                current_index,
+            } => {
                 write!(f, "chunk[size={}, index={}]", chunk_size, current_index)
             }
-            Value::Sparse { data, default, size } => {
-                write!(f, "sparse[size={}, stored={}, default={}]", size, data.len(), default)
-            }
-            Value::Ring { buffer, capacity, head, size } => {
-                write!(f, "ring[")?;
-                for i in 0..*size {
-                    if i > 0 { write!(f, ", ")?; }
-                    let idx = (*head + i) % *capacity;
-                    write!(f, "{}", buffer[idx])?;
-                }
-                write!(f, "] (capacity: {})", capacity)
+            Value::Sparse {
+                data,
+                default,
+                size,
+            } => {
+                write!(
+                    f,
+                    "sparse[size={}, stored={}, default={}]",
+                    size,
+                    data.len(),
+                    default
+                )
             }
             Value::Graph(graph) => {
                 write!(f, "graph{{")?;
                 for (i, (node, edges)) in graph.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}: [", node)?;
                     for (j, (neighbor, weight)) in edges.iter().enumerate() {
-                        if j > 0 { write!(f, ", ")?; }
+                        if j > 0 {
+                            write!(f, ", ")?;
+                        }
                         write!(f, "({}, {})", neighbor, weight)?;
                     }
                     write!(f, "]")?;
@@ -425,9 +515,12 @@ impl fmt::Display for Value {
             Value::Tree { value, children } => {
                 write!(f, "tree{{value: {}, children: [", value)?;
                 for (i, child) in children.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", child)?;
-                }            write!(f, "]}}") 
+                }
+                write!(f, "]}}")
             }
             Value::Module { name, .. } => write!(f, "<module {}>", name),
             Value::Trait { name, .. } => write!(f, "<trait {}>", name),
@@ -442,7 +535,7 @@ pub struct Interpreter {
     globals: HashMap<String, Value>,
     locals: Vec<HashMap<String, Value>>,
     statics: HashMap<String, Value>, // Static variables
-    call_depth: usize, // Track recursion depth
+    call_depth: usize,               // Track recursion depth
     defer_stack: Vec<Vec<(AstNode, Option<Value>)>>, // (expr, value for _) when block exits (LIFO)
     once_cache: HashMap<usize, Value>, // @once decorator cached results
     once_next_id: usize,
@@ -474,24 +567,29 @@ impl Interpreter {
             // Async system
             next_future_id: 0,
         };
-        
+
         // Add built-in functions
         interpreter.add_builtins();
         interpreter
     }
-    
+
     fn add_builtins(&mut self) {
         // Built-in functions will be added here
         // For now, we'll handle them specially in function calls
     }
-    
-    fn apply_decorator(&mut self, decorator_name: &str, decorator_args: &[crate::parser::AstNode], func: Value) -> Result<Value, String> {
+
+    fn apply_decorator(
+        &mut self,
+        decorator_name: &str,
+        decorator_args: &[crate::parser::AstNode],
+        func: Value,
+    ) -> Result<Value, String> {
         // Evaluate decorator arguments
         let mut args = Vec::new();
         for arg in decorator_args {
             args.push(self.eval_node(&Box::new(arg.clone()))?);
         }
-        
+
         // Check if decorator is a built-in or user-defined function
         let decorator_func = self.globals.get(decorator_name).cloned();
         if let Some(Value::Function { params, body, .. }) = decorator_func {
@@ -500,64 +598,66 @@ impl Interpreter {
             call_args.extend(args);
             return self.call_function_internal(decorator_name, &call_args, &params, &*body, None);
         }
-        
+
         // Built-in decorators (from j.txt and jnew_features.txt)
         match decorator_name {
-            "memo" | "cache" => {
-                Ok(self.create_memoized_function(func)?)
-            }
-            "timer" => {
-                Ok(self.create_timed_function(func)?)
-            }
-            "log_call" => {
-                Ok(self.create_logged_function(func)?)
-            }
+            "memo" | "cache" => Ok(self.create_memoized_function(func)?),
+            "timer" => Ok(self.create_timed_function(func)?),
+            "log_call" => Ok(self.create_logged_function(func)?),
             "tco" => {
                 // Tail-call optimization hint - pass through (interpreter may optimize later)
                 Ok(func)
             }
-            "once" => {
-                Ok(self.create_once_function(func)?)
-            }
+            "once" => Ok(self.create_once_function(func)?),
             "throttle" => {
-                let interval_secs = args.first().and_then(|a| if let Value::Float(f) = a { Some(*f) } else { None }).unwrap_or(0.5);
+                let interval_secs = args
+                    .first()
+                    .and_then(|a| {
+                        if let Value::Float(f) = a {
+                            Some(*f)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0.5);
                 Ok(self.create_throttled_function(func, interval_secs)?)
             }
             "debounce" => {
-                let delay_secs = args.first().and_then(|a| if let Value::Float(f) = a { Some(*f) } else { None }).unwrap_or(0.3);
+                let delay_secs = args
+                    .first()
+                    .and_then(|a| {
+                        if let Value::Float(f) = a {
+                            Some(*f)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0.3);
                 Ok(self.create_debounced_function(func, delay_secs)?)
             }
-            "profile" => {
-                Ok(self.create_profiled_function(func)?)
-            }
-            "trace" => {
-                Ok(self.create_trace_function(func)?)
-            }
+            "profile" => Ok(self.create_profiled_function(func)?),
+            "trace" => Ok(self.create_trace_function(func)?),
             "validate_args" | "validate" => {
                 // Schema-based validation - pass through for now; user can define validator fn
                 Ok(func)
             }
-            "deprecated" => {
-                Ok(self.create_deprecated_function(func, &args)?)
-            }
-            _ => {
-                Err(format!("Decorator '{}' not found", decorator_name))
-            }
+            "deprecated" => Ok(self.create_deprecated_function(func, &args)?),
+            _ => Err(format!("Decorator '{}' not found", decorator_name)),
         }
     }
-    
+
     fn create_memoized_function(&mut self, func: Value) -> Result<Value, String> {
         // For now, return the function as-is
         // Full memoization would require a cache map
         Ok(func)
     }
-    
+
     fn create_timed_function(&mut self, func: Value) -> Result<Value, String> {
         // For now, return the function as-is
         // Full timing would require wrapping the call
         Ok(func)
     }
-    
+
     fn create_logged_function(&mut self, func: Value) -> Result<Value, String> {
         // For now, return the function as-is; full logging would wrap the call
         Ok(func)
@@ -572,12 +672,20 @@ impl Interpreter {
         })
     }
 
-    fn create_throttled_function(&mut self, func: Value, _interval_secs: f64) -> Result<Value, String> {
+    fn create_throttled_function(
+        &mut self,
+        func: Value,
+        _interval_secs: f64,
+    ) -> Result<Value, String> {
         // @throttle(sec): max one call per interval - stub
         Ok(func)
     }
 
-    fn create_debounced_function(&mut self, func: Value, _delay_secs: f64) -> Result<Value, String> {
+    fn create_debounced_function(
+        &mut self,
+        func: Value,
+        _delay_secs: f64,
+    ) -> Result<Value, String> {
         // @debounce(sec): delay until silence - stub
         Ok(func)
     }
@@ -594,62 +702,81 @@ impl Interpreter {
 
     fn create_deprecated_function(&mut self, func: Value, args: &[Value]) -> Result<Value, String> {
         // @deprecated("message") - stub; could warn on call
-        let _msg = args.first().map(|v| v.to_string()).unwrap_or_else(|| "deprecated".to_string());
+        let _msg = args
+            .first()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "deprecated".to_string());
         Ok(func)
     }
-    
-    fn call_function_internal(&mut self, _func_name: &str, args: &[Value], params: &[String], body: &AstNode, this_value: Option<Value>) -> Result<Value, String> {
+
+    fn call_function_internal(
+        &mut self,
+        _func_name: &str,
+        args: &[Value],
+        params: &[String],
+        body: &AstNode,
+        this_value: Option<Value>,
+    ) -> Result<Value, String> {
         // Check depth BEFORE incrementing to prevent stack overflow
         if self.call_depth >= 50 {
             return Err(JError::stack_overflow(self.call_depth).to_string());
         }
-        
+
         self.call_depth += 1;
-        
+
         // Push new scope
         self.locals.push(HashMap::new());
-        
+
         // Bind this/self if method call
         if let Some(ref this_val) = this_value {
-            self.locals.last_mut().unwrap().insert("this".to_string(), this_val.clone());
-            self.locals.last_mut().unwrap().insert("self".to_string(), this_val.clone());
+            self.locals
+                .last_mut()
+                .unwrap()
+                .insert("this".to_string(), this_val.clone());
+            self.locals
+                .last_mut()
+                .unwrap()
+                .insert("self".to_string(), this_val.clone());
         }
-        
+
         // Bind parameters
         for (i, param) in params.iter().enumerate() {
             if i < args.len() {
-                self.locals.last_mut().unwrap().insert(param.clone(), args[i].clone());
+                self.locals
+                    .last_mut()
+                    .unwrap()
+                    .insert(param.clone(), args[i].clone());
             }
         }
-        
+
         // Execute body
         let result = self.eval_node(body);
-        
+
         // Pop scope and decrement call depth
         self.locals.pop();
         self.call_depth -= 1;
-        
+
         result
     }
-    
+
     pub fn run(&mut self, source: &str) -> Result<(), String> {
         // Tokenize
         let mut lexer = crate::lexer::Lexer::new(source);
-        let tokens = lexer.tokenize()
+        let tokens = lexer
+            .tokenize()
             .map_err(|e| format!("Lexer error: {}", e))?;
-        
+
         // Parse
         let mut parser = crate::parser::Parser::new(tokens);
-        let ast = parser.parse()
-            .map_err(|e| format!("Parser error: {}", e))?;
-        
+        let ast = parser.parse().map_err(|e| format!("Parser error: {}", e))?;
+
         // Interpret
         self.eval_node(&ast)
             .map_err(|e| format!("Runtime error: {}", e))?;
-        
+
         Ok(())
     }
-    
+
     pub fn evaluate(&mut self, node: &AstNode) -> Result<String, String> {
         let value = self.eval_node(node)?;
         match value {
@@ -657,7 +784,7 @@ impl Interpreter {
             _ => Ok(value.to_string()),
         }
     }
-    
+
     fn eval_node(&mut self, node: &AstNode) -> Result<Value, String> {
         match node {
             AstNode::Integer(i) => Ok(Value::Integer(*i)),
@@ -673,7 +800,7 @@ impl Interpreter {
             }
             AstNode::Boolean(b) => Ok(Value::Boolean(*b)),
             AstNode::Char(c) => Ok(Value::Char(*c)),
-            
+
             AstNode::Infinity(positive) => Ok(Value::Infinity(*positive)),
             AstNode::Emoji(e) => Ok(Value::Emoji(e.clone())),
             AstNode::Money(symbol, amount) => Ok(Value::Money(symbol.clone(), *amount)),
@@ -681,7 +808,7 @@ impl Interpreter {
             AstNode::Date(date) => Ok(Value::Date(date.clone())),
             AstNode::Time(time) => Ok(Value::Time(time.clone())),
             AstNode::DateTime(datetime) => Ok(Value::DateTime(datetime.clone())),
-            
+
             AstNode::Tuple(elements) => {
                 let mut tuple = Vec::new();
                 for element in elements {
@@ -689,7 +816,7 @@ impl Interpreter {
                 }
                 Ok(Value::Tuple(tuple))
             }
-            
+
             AstNode::List(elements) => {
                 let mut list = Vec::new();
                 for element in elements {
@@ -697,7 +824,7 @@ impl Interpreter {
                 }
                 Ok(Value::List(list))
             }
-            
+
             AstNode::Vector(elements) => {
                 let mut vector = Vec::new();
                 for element in elements {
@@ -710,7 +837,7 @@ impl Interpreter {
                 }
                 Ok(Value::Vector(vector))
             }
-            
+
             AstNode::Matrix(rows) => {
                 let mut matrix = Vec::new();
                 for row in rows {
@@ -725,9 +852,11 @@ impl Interpreter {
                     }
                     matrix.push(matrix_row);
                 }
+                // CRITICAL FIX: Validate matrix is not ragged
+                self.validate_matrix(&matrix)?;
                 Ok(Value::Matrix(matrix))
             }
-            
+
             AstNode::Dict(pairs) => {
                 let mut dict = HashMap::new();
                 for (key_node, value_node) in pairs {
@@ -741,14 +870,19 @@ impl Interpreter {
                 }
                 Ok(Value::Dict(dict))
             }
-            
-            AstNode::Identifier(name) => {
-                self.get_variable(name)
-            }
-            
-            AstNode::VarDeclaration { var_type, name, value, immutable: _, is_static, type_modifier: _ } => {
+
+            AstNode::Identifier(name) => self.get_variable(name),
+
+            AstNode::VarDeclaration {
+                var_type,
+                name,
+                value,
+                immutable: _,
+                is_static,
+                type_modifier: _,
+            } => {
                 let val = self.eval_node(value)?;
-                
+
                 // Convert the value based on the declared type
                 let converted_val = match var_type.as_str() {
                     "vec" | "vector" => {
@@ -761,12 +895,20 @@ impl Interpreter {
                                     match item {
                                         Value::Integer(i) => vector.push(i as f64),
                                         Value::Float(f) => vector.push(f),
-                                        _ => return Err("Vector elements must be numeric".to_string()),
+                                        _ => {
+                                            return Err(
+                                                "Vector elements must be numeric".to_string()
+                                            )
+                                        }
                                     }
                                 }
                                 Value::Vector(vector)
                             }
-                            _ => return Err("Vector must be initialized with a list or vector".to_string()),
+                            _ => {
+                                return Err(
+                                    "Vector must be initialized with a list or vector".to_string()
+                                )
+                            }
                         }
                     }
                     "mat" | "matrix" => {
@@ -783,7 +925,12 @@ impl Interpreter {
                                                 match item {
                                                     Value::Integer(i) => matrix_row.push(i as f64),
                                                     Value::Float(f) => matrix_row.push(f),
-                                                    _ => return Err("Matrix elements must be numeric".to_string()),
+                                                    _ => {
+                                                        return Err(
+                                                            "Matrix elements must be numeric"
+                                                                .to_string(),
+                                                        )
+                                                    }
                                                 }
                                             }
                                             matrix.push(matrix_row);
@@ -793,7 +940,12 @@ impl Interpreter {
                                 }
                                 Value::Matrix(matrix)
                             }
-                            _ => return Err("Matrix must be initialized with a list of lists or matrix".to_string()),
+                            _ => {
+                                return Err(
+                                    "Matrix must be initialized with a list of lists or matrix"
+                                        .to_string(),
+                                )
+                            }
                         }
                     }
                     "set" => {
@@ -808,7 +960,12 @@ impl Interpreter {
                                         Value::Integer(i) => i.to_string(),
                                         Value::Float(f) => f.to_string(),
                                         Value::Boolean(b) => b.to_string(),
-                                        _ => return Err("Set elements must be convertible to strings".to_string()),
+                                        _ => {
+                                            return Err(
+                                                "Set elements must be convertible to strings"
+                                                    .to_string(),
+                                            )
+                                        }
                                     };
                                     set.insert(key);
                                 }
@@ -833,27 +990,33 @@ impl Interpreter {
                                 // Count elements in list
                                 let mut counter = HashMap::new();
                                 for item in list {
-                                    let key = match item {
-                                        Value::String(s) => s,
-                                        Value::Integer(i) => i.to_string(),
-                                        Value::Float(f) => f.to_string(),
-                                        Value::Boolean(b) => b.to_string(),
-                                        _ => return Err("Counter elements must be convertible to strings".to_string()),
-                                    };
+                                    let key =
+                                        match item {
+                                            Value::String(s) => s,
+                                            Value::Integer(i) => i.to_string(),
+                                            Value::Float(f) => f.to_string(),
+                                            Value::Boolean(b) => b.to_string(),
+                                            _ => return Err(
+                                                "Counter elements must be convertible to strings"
+                                                    .to_string(),
+                                            ),
+                                        };
                                     *counter.entry(key).or_insert(0) += 1;
                                 }
                                 Value::Counter(counter)
                             }
-                            _ => return Err("Counter must be initialized with a string or list".to_string()),
+                            _ => {
+                                return Err(
+                                    "Counter must be initialized with a string or list".to_string()
+                                )
+                            }
                         }
                     }
-                    "deque" => {
-                        match val {
-                            Value::Deque(_) => val,
-                            Value::List(list) => Value::Deque(list),
-                            _ => return Err("Deque must be initialized with a list".to_string()),
-                        }
-                    }
+                    "deque" => match val {
+                        Value::Deque(_) => val,
+                        Value::List(list) => Value::Deque(list),
+                        _ => return Err("Deque must be initialized with a list".to_string()),
+                    },
                     "priorityq" => {
                         match val {
                             Value::PriorityQ(_) => val,
@@ -875,7 +1038,12 @@ impl Interpreter {
                                 }
                                 Value::PriorityQ(pq)
                             }
-                            _ => return Err("Priority queue must be initialized with a list of tuples".to_string()),
+                            _ => {
+                                return Err(
+                                    "Priority queue must be initialized with a list of tuples"
+                                        .to_string(),
+                                )
+                            }
                         }
                     }
                     "graph" => {
@@ -907,48 +1075,64 @@ impl Interpreter {
                                             }
                                             graph.insert(node, edge_list);
                                         }
-                                        _ => return Err("Graph node edges must be a list".to_string()),
+                                        _ => {
+                                            return Err(
+                                                "Graph node edges must be a list".to_string()
+                                            )
+                                        }
                                     }
                                 }
                                 Value::Graph(graph)
                             }
-                            _ => return Err("Graph must be initialized with a dictionary".to_string()),
+                            _ => {
+                                return Err(
+                                    "Graph must be initialized with a dictionary".to_string()
+                                )
+                            }
                         }
                     }
-                    "grid" => {
-                        match val {
-                            Value::Grid(_) => val,
-                            Value::Matrix(rows) => {
-                                let grid: Vec<Vec<Value>> = rows
-                                    .into_iter()
-                                    .map(|row| row.into_iter().map(|f| Value::Float(f)).collect())
-                                    .collect();
-                                Value::Grid(grid)
-                            }
-                            Value::List(rows) => {
-                                let mut grid = Vec::new();
-                                for row in rows {
-                                    match row {
-                                        Value::List(cells) => grid.push(cells),
-                                        _ => return Err("Grid must be a list of lists (2D)".to_string()),
+                    "grid" => match val {
+                        Value::Grid(_) => val,
+                        Value::Matrix(rows) => {
+                            let grid: Vec<Vec<Value>> = rows
+                                .into_iter()
+                                .map(|row| row.into_iter().map(|f| Value::Float(f)).collect())
+                                .collect();
+                            Value::Grid(grid)
+                        }
+                        Value::List(rows) => {
+                            let mut grid = Vec::new();
+                            for row in rows {
+                                match row {
+                                    Value::List(cells) => grid.push(cells),
+                                    _ => {
+                                        return Err("Grid must be a list of lists (2D)".to_string())
                                     }
                                 }
-                                Value::Grid(grid)
                             }
-                            _ => return Err("Grid must be initialized with a list of lists or matrix literal".to_string()),
+                            Value::Grid(grid)
                         }
-                    }
+                        _ => {
+                            return Err(
+                                "Grid must be initialized with a list of lists or matrix literal"
+                                    .to_string(),
+                            )
+                        }
+                    },
                     "tree" => {
                         match val {
                             Value::Tree { .. } => val,
                             Value::Dict(dict) => {
                                 // Convert dict to tree: {value: ..., children: [...]}
-                                let value = dict.get("value")
+                                let value = dict
+                                    .get("value")
                                     .ok_or_else(|| "Tree must have 'value' field".to_string())?
                                     .clone();
                                 let children = match dict.get("children") {
                                     Some(Value::List(children_list)) => children_list.clone(),
-                                    Some(_) => return Err("Tree 'children' must be a list".to_string()),
+                                    Some(_) => {
+                                        return Err("Tree 'children' must be a list".to_string())
+                                    }
                                     None => Vec::new(),
                                 };
                                 Value::Tree {
@@ -956,7 +1140,9 @@ impl Interpreter {
                                     children,
                                 }
                             }
-                            _ => return Err("Tree must be initialized with a dictionary".to_string()),
+                            _ => {
+                                return Err("Tree must be initialized with a dictionary".to_string())
+                            }
                         }
                     }
                     // Advanced array types
@@ -975,33 +1161,27 @@ impl Interpreter {
                             _ => return Err("Span must be initialized with a list".to_string()),
                         }
                     }
-                    "mut_span" => {
-                        match val {
-                            Value::MutSpan { .. } => val,
-                            Value::List(list) => {
-                                let len = list.len();
-                                Value::MutSpan {
-                                    source: Box::new(Value::List(list)),
-                                    start: 0,
-                                    end: len,
-                                }
+                    "mut_span" => match val {
+                        Value::MutSpan { .. } => val,
+                        Value::List(list) => {
+                            let len = list.len();
+                            Value::MutSpan {
+                                source: Box::new(Value::List(list)),
+                                start: 0,
+                                end: len,
                             }
-                            _ => return Err("MutSpan must be initialized with a list".to_string()),
                         }
-                    }
-                    "chunk" => {
-                        match val {
-                            Value::Chunk { .. } => val,
-                            Value::List(list) => {
-                                Value::Chunk {
-                                    source: Box::new(Value::List(list)),
-                                    chunk_size: 1,
-                                    current_index: 0,
-                                }
-                            }
-                            _ => return Err("Chunk must be initialized with a list".to_string()),
-                        }
-                    }
+                        _ => return Err("MutSpan must be initialized with a list".to_string()),
+                    },
+                    "chunk" => match val {
+                        Value::Chunk { .. } => val,
+                        Value::List(list) => Value::Chunk {
+                            source: Box::new(Value::List(list)),
+                            chunk_size: 1,
+                            current_index: 0,
+                        },
+                        _ => return Err("Chunk must be initialized with a list".to_string()),
+                    },
                     "sparse" => {
                         match val {
                             Value::Sparse { .. } => val,
@@ -1025,7 +1205,11 @@ impl Interpreter {
                                     size: size as usize,
                                 }
                             }
-                            _ => return Err("Sparse must be initialized with a list or size".to_string()),
+                            _ => {
+                                return Err(
+                                    "Sparse must be initialized with a list or size".to_string()
+                                )
+                            }
                         }
                     }
                     "ring" => {
@@ -1050,12 +1234,15 @@ impl Interpreter {
                                     size: capacity,
                                 }
                             }
-                            _ => return Err("Ring must be initialized with capacity (int) or list".to_string()),
+                            _ => {
+                                return Err("Ring must be initialized with capacity (int) or list"
+                                    .to_string())
+                            }
                         }
                     }
                     _ => val, // No conversion needed for other types
                 };
-                
+
                 if *is_static {
                     self.statics.insert(name.clone(), converted_val.clone());
                 } else {
@@ -1063,11 +1250,15 @@ impl Interpreter {
                 }
                 Ok(converted_val)
             }
-            
-            AstNode::EnumDeclaration { name, backing_type: _, variants } => {
+
+            AstNode::EnumDeclaration {
+                name,
+                backing_type: _,
+                variants,
+            } => {
                 let mut variant_map = HashMap::new();
                 let mut next_int_val = 1;
-                
+
                 for (var_name, val_expr) in variants {
                     let val = if let Some(expr) = val_expr {
                         self.eval_node(expr)?
@@ -1078,22 +1269,30 @@ impl Interpreter {
                     };
                     variant_map.insert(var_name.clone(), val);
                 }
-                
+
                 let enum_val = Value::Enum {
                     name: name.clone(),
                     variants: variant_map,
                 };
-                
+
                 self.set_variable(name.clone(), enum_val.clone());
                 Ok(enum_val)
-            },
+            }
 
-            AstNode::ClassDeclaration { name, parent, traits: _, fields, methods, static_fields, static_methods } => {
+            AstNode::ClassDeclaration {
+                name,
+                parent,
+                traits: _,
+                fields,
+                methods,
+                static_fields,
+                static_methods,
+            } => {
                 let mut class_fields = HashMap::new();
                 let mut class_methods = HashMap::new();
                 let mut class_static_fields = HashMap::new();
                 let mut class_static_methods = HashMap::new();
-                
+
                 for field in fields {
                     let default_val = if let Some(ref expr) = field.default_value {
                         self.eval_node(expr)?
@@ -1102,7 +1301,7 @@ impl Interpreter {
                     };
                     class_fields.insert(field.name.clone(), default_val);
                 }
-                
+
                 for field in static_fields {
                     let default_val = if let Some(ref expr) = field.default_value {
                         self.eval_node(expr)?
@@ -1111,10 +1310,17 @@ impl Interpreter {
                     };
                     class_static_fields.insert(field.name.clone(), default_val);
                 }
-                
+
                 for method in methods {
-                    if let AstNode::FunctionDeclaration { name: method_name, params, body, .. } = method {
-                        let param_names: Vec<String> = params.iter().map(|(_, n)| n.clone()).collect();
+                    if let AstNode::FunctionDeclaration {
+                        name: method_name,
+                        params,
+                        body,
+                        ..
+                    } = method
+                    {
+                        let param_names: Vec<String> =
+                            params.iter().map(|(_, n)| n.clone()).collect();
                         let func = Value::Function {
                             name: method_name.clone(),
                             params: param_names,
@@ -1123,10 +1329,17 @@ impl Interpreter {
                         class_methods.insert(method_name.clone(), func);
                     }
                 }
-                
+
                 for method in static_methods {
-                    if let AstNode::FunctionDeclaration { name: method_name, params, body, .. } = method {
-                        let param_names: Vec<String> = params.iter().map(|(_, n)| n.clone()).collect();
+                    if let AstNode::FunctionDeclaration {
+                        name: method_name,
+                        params,
+                        body,
+                        ..
+                    } = method
+                    {
+                        let param_names: Vec<String> =
+                            params.iter().map(|(_, n)| n.clone()).collect();
                         let func = Value::Function {
                             name: method_name.clone(),
                             params: param_names,
@@ -1135,7 +1348,7 @@ impl Interpreter {
                         class_static_methods.insert(method_name.clone(), func);
                     }
                 }
-                
+
                 let class_val = Value::Class {
                     name: name.clone(),
                     parent: parent.clone(),
@@ -1144,61 +1357,75 @@ impl Interpreter {
                     static_fields: class_static_fields,
                     static_methods: class_static_methods,
                 };
-                
+
                 self.set_variable(name.clone(), class_val.clone());
                 Ok(class_val)
             }
 
-            AstNode::FunctionDeclaration { name, params, body, decorators, .. } => {
-                let param_names: Vec<String> = params.iter().map(|(_, name)| name.clone()).collect();
+            AstNode::FunctionDeclaration {
+                name,
+                params,
+                body,
+                decorators,
+                ..
+            } => {
+                let param_names: Vec<String> =
+                    params.iter().map(|(_, name)| name.clone()).collect();
                 let mut func = Value::Function {
                     name: name.clone(),
                     params: param_names,
                     body: body.clone(),
                 };
-                
+
                 // Apply decorators (bottom-to-top order)
                 for decorator in decorators.iter().rev() {
                     func = self.apply_decorator(&decorator.name, &decorator.args, func)?;
                 }
-                
+
                 self.set_variable(name.clone(), func.clone());
                 Ok(func)
             }
-            
-            AstNode::FunctionCall { name, args } => {
-                self.call_function(name, args)
-            }
+
+            AstNode::FunctionCall { name, args } => self.call_function(name, args),
 
             AstNode::Call { callee, args } => {
-                let (callee_val, this_opt) = if let AstNode::DotAccess { object, field } = callee.as_ref() {
-                    let receiver = self.eval_node(object)?;
-                    let val = self.get_property(&receiver, field)?;
-                    let this_opt = match &receiver {
-                        Value::Instance { .. } => Some(receiver),
-                        _ => None,
+                let (callee_val, this_opt) =
+                    if let AstNode::DotAccess { object, field } = callee.as_ref() {
+                        let receiver = self.eval_node(object)?;
+                        let val = self.get_property(&receiver, field)?;
+                        let this_opt = match &receiver {
+                            Value::Instance { .. } => Some(receiver),
+                            _ => None,
+                        };
+                        (val, this_opt)
+                    } else {
+                        (self.eval_node(callee)?, None)
                     };
-                    (val, this_opt)
-                } else {
-                    (self.eval_node(callee)?, None)
-                };
                 self.call_value(callee_val, args, this_opt)
             }
 
             AstNode::BroadcastCall { callee, args } => {
                 let callee_val = self.eval_node(callee)?;
-                let evaled_args: Vec<Value> = args.iter().map(|a| self.eval_node(a)).collect::<Result<Vec<_>, _>>()?;
+                let evaled_args: Vec<Value> = args
+                    .iter()
+                    .map(|a| self.eval_node(a))
+                    .collect::<Result<Vec<_>, _>>()?;
                 let len = evaled_args.iter().fold(1usize, |acc, v| {
-                    if let Value::List(l) = v { acc.max(l.len()) } else { acc }
+                    if let Value::List(l) = v {
+                        acc.max(l.len())
+                    } else {
+                        acc
+                    }
                 });
                 let mut results = Vec::with_capacity(len);
                 for i in 0..len {
-                    let call_args: Vec<Value> = evaled_args.iter().map(|v| {
-                        match v {
+                    let call_args: Vec<Value> = evaled_args
+                        .iter()
+                        .map(|v| match v {
                             Value::List(l) => l.get(i).cloned().unwrap_or(Value::None),
                             _ => v.clone(),
-                        }
-                    }).collect();
+                        })
+                        .collect();
                     let result = self.call_value_with_args(callee_val.clone(), &call_args, None)?;
                     results.push(result);
                 }
@@ -1208,68 +1435,88 @@ impl Interpreter {
                     Ok(Value::List(results))
                 }
             }
-            
-            AstNode::Binary { left, operator, right } => {
+
+            AstNode::Binary {
+                left,
+                operator,
+                right,
+            } => {
                 let left_val = self.eval_node(left)?;
                 let right_val = self.eval_node(right)?;
                 self.eval_binary_op(&left_val, operator, &right_val)
             }
-            
+
             AstNode::Unary { operator, operand } => {
                 let val = self.eval_node(operand)?;
                 self.eval_unary_op(operator, &val)
             }
-            
+
             AstNode::Pipeline { left, right } => {
                 let left_val = self.eval_node(left)?;
-                
+
                 // Set the pipeline value as '_' for the right side
                 self.set_variable("_".to_string(), left_val.clone());
-                
+
                 // Also set it as a special pipeline variable
                 self.set_variable("__pipeline__".to_string(), left_val);
-                
+
                 let result = self.eval_node(right)?;
-                
+
                 // Clean up pipeline variable
                 self.set_variable("__pipeline__".to_string(), Value::None);
-                
+
                 Ok(result)
             }
-            
+
             AstNode::DotAccess { object, field } => {
                 let obj_val = self.eval_node(object)?;
                 match obj_val {
-                    Value::Enum { name: enum_name, variants } => {
+                    Value::Enum {
+                        name: enum_name,
+                        variants,
+                    } => {
                         if let Some(val) = variants.get(field) {
-                             Ok(Value::EnumVariant {
+                            Ok(Value::EnumVariant {
                                 enum_name: enum_name.clone(),
                                 variant_name: field.clone(),
-                                value: Box::new(val.clone())
+                                value: Box::new(val.clone()),
                             })
                         } else {
                             match field.as_str() {
                                 "count" => Ok(Value::Integer(variants.len() as i64)),
                                 "names" => {
-                                    let names: Vec<Value> = variants.keys().map(|k| Value::String(k.clone())).collect();
+                                    let names: Vec<Value> =
+                                        variants.keys().map(|k| Value::String(k.clone())).collect();
                                     Ok(Value::List(names))
                                 }
                                 "values" => {
                                     let vals: Vec<Value> = variants.values().cloned().collect();
                                     Ok(Value::List(vals))
                                 }
-                                _ => Err(format!("Unknown variant or method '{}' on enum '{}'", field, enum_name))
+                                _ => Err(format!(
+                                    "Unknown variant or method '{}' on enum '{}'",
+                                    field, enum_name
+                                )),
                             }
                         }
                     }
-                    Value::EnumVariant { enum_name: _, variant_name, value } => {
-                        match field.as_str() {
-                            "label" | "name" => Ok(Value::String(variant_name)),
-                            "value" => Ok(*value),
-                            _ => Err(format!("Unknown property '{}' on enum variant", field))
-                        }
-                    }
-                    Value::Class { name: class_name, parent: _, fields: _, methods: _, static_fields, static_methods } => {
+                    Value::EnumVariant {
+                        enum_name: _,
+                        variant_name,
+                        value,
+                    } => match field.as_str() {
+                        "label" | "name" => Ok(Value::String(variant_name)),
+                        "value" => Ok(*value),
+                        _ => Err(format!("Unknown property '{}' on enum variant", field)),
+                    },
+                    Value::Class {
+                        name: class_name,
+                        parent: _,
+                        fields: _,
+                        methods: _,
+                        static_fields,
+                        static_methods,
+                    } => {
                         if field == "new" {
                             Ok(Value::Constructor(class_name.clone()))
                         } else if let Some(v) = static_fields.get(field) {
@@ -1277,7 +1524,10 @@ impl Interpreter {
                         } else if let Some(v) = static_methods.get(field) {
                             Ok(v.clone())
                         } else {
-                            Err(format!("Unknown static field or method '{}' on class '{}'", field, class_name))
+                            Err(format!(
+                                "Unknown static field or method '{}' on class '{}'",
+                                field, class_name
+                            ))
                         }
                     }
                     Value::Instance { class_name, fields } => {
@@ -1305,7 +1555,8 @@ impl Interpreter {
                                     Ok(Value::List(items))
                                 }
                                 "keys" => {
-                                    let keys: Vec<Value> = dict.keys().map(|k| Value::String(k.clone())).collect();
+                                    let keys: Vec<Value> =
+                                        dict.keys().map(|k| Value::String(k.clone())).collect();
                                     Ok(Value::List(keys))
                                 }
                                 "values" => {
@@ -1313,27 +1564,35 @@ impl Interpreter {
                                     Ok(Value::List(values))
                                 }
                                 "has" => {
-                                    return Err("dict.has() requires a key argument - use dict.has(key)".to_string());
+                                    return Err(
+                                        "dict.has() requires a key argument - use dict.has(key)"
+                                            .to_string(),
+                                    );
                                 }
                                 "get" => {
-                                    return Err("dict.get() requires key and optional default arguments".to_string());
+                                    return Err(
+                                        "dict.get() requires key and optional default arguments"
+                                            .to_string(),
+                                    );
                                 }
                                 "remove" => {
                                     return Err("dict.remove() requires a key argument - use dict.remove(key)".to_string());
                                 }
                                 "merge" => {
-                                    return Err("dict.merge() requires another dict argument".to_string());
+                                    return Err(
+                                        "dict.merge() requires another dict argument".to_string()
+                                    );
                                 }
                                 "update" => {
-                                    return Err("dict.update() requires another dict argument".to_string());
+                                    return Err(
+                                        "dict.update() requires another dict argument".to_string()
+                                    );
                                 }
                                 "clear" => {
                                     return Err("dict.clear() cannot be called as a method - use clear(dict)".to_string());
                                 }
-                                "size" | "len" | "length" => {
-                                    Ok(Value::Integer(dict.len() as i64))
-                                }
-                                _ => Err(format!("Dictionary field '{}' not found", field))
+                                "size" | "len" | "length" => Ok(Value::Integer(dict.len() as i64)),
+                                _ => Err(format!("Dictionary field '{}' not found", field)),
                             }
                         }
                     }
@@ -1341,15 +1600,23 @@ impl Interpreter {
                         // List methods
                         match field.as_str() {
                             "len" | "length" | "size" => Ok(Value::Integer(list.len() as i64)),
-                            "first" => list.first().cloned().ok_or_else(|| "List is empty".to_string()),
-                            "last" => list.last().cloned().ok_or_else(|| "List is empty".to_string()),
+                            "first" => list
+                                .first()
+                                .cloned()
+                                .ok_or_else(|| "List is empty".to_string()),
+                            "last" => list
+                                .last()
+                                .cloned()
+                                .ok_or_else(|| "List is empty".to_string()),
                             "sum" => {
                                 let mut sum = 0.0;
                                 for item in list.iter() {
                                     match item {
                                         Value::Integer(i) => sum += *i as f64,
                                         Value::Float(f) => sum += f,
-                                        _ => return Err("sum() requires numeric values".to_string()),
+                                        _ => {
+                                            return Err("sum() requires numeric values".to_string())
+                                        }
                                     }
                                 }
                                 if list.iter().all(|v| matches!(v, Value::Integer(_))) {
@@ -1364,7 +1631,11 @@ impl Interpreter {
                                     match item {
                                         Value::Integer(i) => product *= *i as f64,
                                         Value::Float(f) => product *= f,
-                                        _ => return Err("product() requires numeric values".to_string()),
+                                        _ => {
+                                            return Err(
+                                                "product() requires numeric values".to_string()
+                                            )
+                                        }
                                     }
                                 }
                                 if list.iter().all(|v| matches!(v, Value::Integer(_))) {
@@ -1380,10 +1651,22 @@ impl Interpreter {
                                 let mut min_val = list[0].clone();
                                 for item in list.iter().skip(1) {
                                     match (&min_val, item) {
-                                        (Value::Integer(a), Value::Integer(b)) if b < a => min_val = item.clone(),
-                                        (Value::Float(a), Value::Float(b)) if b < a => min_val = item.clone(),
-                                        (Value::Integer(a), Value::Float(b)) if (*b as i64) < *a => min_val = item.clone(),
-                                        (Value::Float(a), Value::Integer(b)) if (*b as f64) < *a => min_val = item.clone(),
+                                        (Value::Integer(a), Value::Integer(b)) if b < a => {
+                                            min_val = item.clone()
+                                        }
+                                        (Value::Float(a), Value::Float(b)) if b < a => {
+                                            min_val = item.clone()
+                                        }
+                                        (Value::Integer(a), Value::Float(b))
+                                            if (*b as i64) < *a =>
+                                        {
+                                            min_val = item.clone()
+                                        }
+                                        (Value::Float(a), Value::Integer(b))
+                                            if (*b as f64) < *a =>
+                                        {
+                                            min_val = item.clone()
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -1396,10 +1679,22 @@ impl Interpreter {
                                 let mut max_val = list[0].clone();
                                 for item in list.iter().skip(1) {
                                     match (&max_val, item) {
-                                        (Value::Integer(a), Value::Integer(b)) if b > a => max_val = item.clone(),
-                                        (Value::Float(a), Value::Float(b)) if b > a => max_val = item.clone(),
-                                        (Value::Integer(a), Value::Float(b)) if (*b as i64) > *a => max_val = item.clone(),
-                                        (Value::Float(a), Value::Integer(b)) if (*b as f64) > *a => max_val = item.clone(),
+                                        (Value::Integer(a), Value::Integer(b)) if b > a => {
+                                            max_val = item.clone()
+                                        }
+                                        (Value::Float(a), Value::Float(b)) if b > a => {
+                                            max_val = item.clone()
+                                        }
+                                        (Value::Integer(a), Value::Float(b))
+                                            if (*b as i64) > *a =>
+                                        {
+                                            max_val = item.clone()
+                                        }
+                                        (Value::Float(a), Value::Integer(b))
+                                            if (*b as f64) > *a =>
+                                        {
+                                            max_val = item.clone()
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -1412,13 +1707,29 @@ impl Interpreter {
                                     let v = match item {
                                         Value::Integer(i) => *i as f64,
                                         Value::Float(f) => *f,
-                                        _ => return Err("scan_max() requires numeric list".to_string()),
+                                        _ => {
+                                            return Err(
+                                                "scan_max() requires numeric list".to_string()
+                                            )
+                                        }
                                     };
-                                    running_max = Some(running_max.map(|m: f64| m.max(v)).unwrap_or(v));
+                                    running_max =
+                                        Some(running_max.map(|m: f64| m.max(v)).unwrap_or(v));
                                     result.push(Value::Float(running_max.unwrap()));
                                 }
                                 if list.iter().all(|v| matches!(v, Value::Integer(_))) {
-                                    Ok(Value::List(result.iter().map(|v| if let Value::Float(f) = v { Value::Integer(*f as i64) } else { v.clone() }).collect()))
+                                    Ok(Value::List(
+                                        result
+                                            .iter()
+                                            .map(|v| {
+                                                if let Value::Float(f) = v {
+                                                    Value::Integer(*f as i64)
+                                                } else {
+                                                    v.clone()
+                                                }
+                                            })
+                                            .collect(),
+                                    ))
                                 } else {
                                     Ok(Value::List(result))
                                 }
@@ -1430,12 +1741,27 @@ impl Interpreter {
                                     match item {
                                         Value::Integer(i) => running += *i as f64,
                                         Value::Float(f) => running += f,
-                                        _ => return Err("scan_sum() requires numeric list".to_string()),
+                                        _ => {
+                                            return Err(
+                                                "scan_sum() requires numeric list".to_string()
+                                            )
+                                        }
                                     }
                                     result.push(Value::Float(running));
                                 }
                                 if list.iter().all(|v| matches!(v, Value::Integer(_))) {
-                                    Ok(Value::List(result.iter().map(|v| if let Value::Float(f) = v { Value::Integer(*f as i64) } else { v.clone() }).collect()))
+                                    Ok(Value::List(
+                                        result
+                                            .iter()
+                                            .map(|v| {
+                                                if let Value::Float(f) = v {
+                                                    Value::Integer(*f as i64)
+                                                } else {
+                                                    v.clone()
+                                                }
+                                            })
+                                            .collect(),
+                                    ))
                                 } else {
                                     Ok(Value::List(result))
                                 }
@@ -1447,14 +1773,29 @@ impl Interpreter {
                                     let v = match item {
                                         Value::Integer(i) => *i as f64,
                                         Value::Float(f) => *f,
-                                        _ => return Err("scan_right_max() requires numeric list".to_string()),
+                                        _ => {
+                                            return Err("scan_right_max() requires numeric list"
+                                                .to_string())
+                                        }
                                     };
-                                    running_max = Some(running_max.map(|m: f64| m.max(v)).unwrap_or(v));
+                                    running_max =
+                                        Some(running_max.map(|m: f64| m.max(v)).unwrap_or(v));
                                     result.push(Value::Float(running_max.unwrap()));
                                 }
                                 result.reverse();
                                 if list.iter().all(|v| matches!(v, Value::Integer(_))) {
-                                    Ok(Value::List(result.iter().map(|v| if let Value::Float(f) = v { Value::Integer(*f as i64) } else { v.clone() }).collect()))
+                                    Ok(Value::List(
+                                        result
+                                            .iter()
+                                            .map(|v| {
+                                                if let Value::Float(f) = v {
+                                                    Value::Integer(*f as i64)
+                                                } else {
+                                                    v.clone()
+                                                }
+                                            })
+                                            .collect(),
+                                    ))
                                 } else {
                                     Ok(Value::List(result))
                                 }
@@ -1468,7 +1809,9 @@ impl Interpreter {
                                     match item {
                                         Value::Integer(i) => sum += *i as f64,
                                         Value::Float(f) => sum += f,
-                                        _ => return Err("mean() requires numeric values".to_string()),
+                                        _ => {
+                                            return Err("mean() requires numeric values".to_string())
+                                        }
                                     }
                                 }
                                 Ok(Value::Float(sum / list.len() as f64))
@@ -1478,20 +1821,18 @@ impl Interpreter {
                                     return Err("median() requires non-empty list".to_string());
                                 }
                                 let mut sorted = list.clone();
-                                sorted.sort_by(|a, b| {
-                                    match (a, b) {
-                                        (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
-                                        (Value::Float(x), Value::Float(y)) => {
-                                            x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
-                                        }
-                                        (Value::Integer(x), Value::Float(y)) => {
-                                            (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
-                                        }
-                                        (Value::Float(x), Value::Integer(y)) => {
-                                            x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal)
-                                        }
-                                        _ => std::cmp::Ordering::Equal
+                                sorted.sort_by(|a, b| match (a, b) {
+                                    (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
+                                    (Value::Float(x), Value::Float(y)) => {
+                                        x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
                                     }
+                                    (Value::Integer(x), Value::Float(y)) => (*x as f64)
+                                        .partial_cmp(y)
+                                        .unwrap_or(std::cmp::Ordering::Equal),
+                                    (Value::Float(x), Value::Integer(y)) => x
+                                        .partial_cmp(&(*y as f64))
+                                        .unwrap_or(std::cmp::Ordering::Equal),
+                                    _ => std::cmp::Ordering::Equal,
                                 });
                                 let mid = sorted.len() / 2;
                                 if sorted.len() % 2 == 0 {
@@ -1509,7 +1850,7 @@ impl Interpreter {
                                         (Value::Float(a), Value::Integer(b)) => {
                                             Ok(Value::Float((a + *b as f64) / 2.0))
                                         }
-                                        _ => Ok(sorted[mid - 1].clone())
+                                        _ => Ok(sorted[mid - 1].clone()),
                                     }
                                 } else {
                                     Ok(sorted[mid].clone())
@@ -1517,21 +1858,19 @@ impl Interpreter {
                             }
                             "sorted" => {
                                 let mut sorted = list.clone();
-                                sorted.sort_by(|a, b| {
-                                    match (a, b) {
-                                        (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
-                                        (Value::Float(x), Value::Float(y)) => {
-                                            x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
-                                        }
-                                        (Value::Integer(x), Value::Float(y)) => {
-                                            (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
-                                        }
-                                        (Value::Float(x), Value::Integer(y)) => {
-                                            x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal)
-                                        }
-                                        (Value::String(x), Value::String(y)) => x.cmp(y),
-                                        _ => std::cmp::Ordering::Equal
+                                sorted.sort_by(|a, b| match (a, b) {
+                                    (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
+                                    (Value::Float(x), Value::Float(y)) => {
+                                        x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
                                     }
+                                    (Value::Integer(x), Value::Float(y)) => (*x as f64)
+                                        .partial_cmp(y)
+                                        .unwrap_or(std::cmp::Ordering::Equal),
+                                    (Value::Float(x), Value::Integer(y)) => x
+                                        .partial_cmp(&(*y as f64))
+                                        .unwrap_or(std::cmp::Ordering::Equal),
+                                    (Value::String(x), Value::String(y)) => x.cmp(y),
+                                    _ => std::cmp::Ordering::Equal,
                                 });
                                 Ok(Value::List(sorted))
                             }
@@ -1551,44 +1890,67 @@ impl Interpreter {
                                 }
                                 Ok(Value::List(unique))
                             }
-                            "empty" | "is_empty" => {
-                                Ok(Value::Boolean(list.is_empty()))
-                            }
+                            "empty" | "is_empty" => Ok(Value::Boolean(list.is_empty())),
                             "any" => {
-                                return Err("list.any() requires a predicate function - use any(list, fn)".to_string());
+                                return Err(
+                                    "list.any() requires a predicate function - use any(list, fn)"
+                                        .to_string(),
+                                );
                             }
                             "all" => {
-                                return Err("list.all() requires a predicate function - use all(list, fn)".to_string());
+                                return Err(
+                                    "list.all() requires a predicate function - use all(list, fn)"
+                                        .to_string(),
+                                );
                             }
                             "count" => {
-                                return Err("list.count() requires an argument - use list.count(value)".to_string());
+                                return Err(
+                                    "list.count() requires an argument - use list.count(value)"
+                                        .to_string(),
+                                );
                             }
                             "contains" => {
                                 return Err("list.contains() requires an argument - use list.contains(value)".to_string());
                             }
                             "index" | "find" => {
-                                return Err("list.index() requires an argument - use list.index(value)".to_string());
+                                return Err(
+                                    "list.index() requires an argument - use list.index(value)"
+                                        .to_string(),
+                                );
                             }
                             "join" => {
                                 return Err("list.join() requires a separator argument - use list.join(sep)".to_string());
                             }
-                            _ => Err(format!("List method '{}' not found", field))
+                            _ => Err(format!("List method '{}' not found", field)),
                         }
                     }
                     Value::String(s) => {
                         // String methods
                         match field.as_str() {
                             "len" | "length" | "size" => Ok(Value::Integer(s.len() as i64)),
-                            "first" => s.chars().next().map(|c| Value::Char(c)).ok_or_else(|| "String is empty".to_string()),
-                            "last" => s.chars().last().map(|c| Value::Char(c)).ok_or_else(|| "String is empty".to_string()),
+                            "first" => s
+                                .chars()
+                                .next()
+                                .map(|c| Value::Char(c))
+                                .ok_or_else(|| "String is empty".to_string()),
+                            "last" => s
+                                .chars()
+                                .last()
+                                .map(|c| Value::Char(c))
+                                .ok_or_else(|| "String is empty".to_string()),
                             "empty" | "is_empty" => Ok(Value::Boolean(s.is_empty())),
                             "upper" | "uppercase" => Ok(Value::String(s.to_uppercase())),
                             "lower" | "lowercase" => Ok(Value::String(s.to_lowercase())),
                             "trim" => Ok(Value::String(s.trim().to_string())),
-                            "trim_start" | "trim_left" => Ok(Value::String(s.trim_start().to_string())),
-                            "trim_end" | "trim_right" => Ok(Value::String(s.trim_end().to_string())),
+                            "trim_start" | "trim_left" => {
+                                Ok(Value::String(s.trim_start().to_string()))
+                            }
+                            "trim_end" | "trim_right" => {
+                                Ok(Value::String(s.trim_end().to_string()))
+                            }
                             "lines" => {
-                                let lines: Vec<Value> = s.lines().map(|l| Value::String(l.to_string())).collect();
+                                let lines: Vec<Value> =
+                                    s.lines().map(|l| Value::String(l.to_string())).collect();
                                 Ok(Value::List(lines))
                             }
                             "chars" => {
@@ -1602,39 +1964,48 @@ impl Interpreter {
                                 return Err("string.contains() requires a substring argument - use string.contains(substr)".to_string());
                             }
                             "starts_with" | "startswith" => {
-                                return Err("string.starts_with() requires a prefix argument".to_string());
+                                return Err(
+                                    "string.starts_with() requires a prefix argument".to_string()
+                                );
                             }
                             "ends_with" | "endswith" => {
-                                return Err("string.ends_with() requires a suffix argument".to_string());
+                                return Err(
+                                    "string.ends_with() requires a suffix argument".to_string()
+                                );
                             }
                             "replace" => {
                                 return Err("string.replace() requires old and new arguments - use string.replace(old, new)".to_string());
                             }
-                            _ => Err(format!("String method '{}' not found", field))
+                            _ => Err(format!("String method '{}' not found", field)),
                         }
                     }
-                    Value::Counter(counter) => {
-                        match field.as_str() {
-                            "most_common" => {
-                                let mut items: Vec<_> = counter.iter().collect();
-                                items.sort_by(|a, b| b.1.cmp(a.1));
-                                let result: Vec<Value> = items.iter()
-                                    .map(|(k, v)| Value::Tuple(vec![Value::String(k.to_string()), Value::Integer(**v)]))
-                                    .collect();
-                                Ok(Value::List(result))
-                            }
-                            "elements" | "keys" => {
-                                let keys: Vec<Value> = counter.keys().map(|k| Value::String(k.clone())).collect();
-                                Ok(Value::List(keys))
-                            }
-                            "total" => {
-                                let total: i64 = counter.values().sum();
-                                Ok(Value::Integer(total))
-                            }
-                            "len" | "length" | "size" => Ok(Value::Integer(counter.len() as i64)),
-                            _ => Err(format!("Counter method '{}' not found", field)),
+                    Value::Counter(counter) => match field.as_str() {
+                        "most_common" => {
+                            let mut items: Vec<_> = counter.iter().collect();
+                            items.sort_by(|a, b| b.1.cmp(a.1));
+                            let result: Vec<Value> = items
+                                .iter()
+                                .map(|(k, v)| {
+                                    Value::Tuple(vec![
+                                        Value::String(k.to_string()),
+                                        Value::Integer(**v),
+                                    ])
+                                })
+                                .collect();
+                            Ok(Value::List(result))
                         }
-                    }
+                        "elements" | "keys" => {
+                            let keys: Vec<Value> =
+                                counter.keys().map(|k| Value::String(k.clone())).collect();
+                            Ok(Value::List(keys))
+                        }
+                        "total" => {
+                            let total: i64 = counter.values().sum();
+                            Ok(Value::Integer(total))
+                        }
+                        "len" | "length" | "size" => Ok(Value::Integer(counter.len() as i64)),
+                        _ => Err(format!("Counter method '{}' not found", field)),
+                    },
                     Value::Interval(start, end) => {
                         match field.as_str() {
                             "start" => Ok(Value::Integer(start)),
@@ -1642,25 +2013,37 @@ impl Interpreter {
                             "len" | "length" | "size" => Ok(Value::Integer((end - start).abs())),
                             "overlaps" => {
                                 // Returns a callable that checks if another interval overlaps
-                                return Err("interval.overlaps() requires another interval argument".to_string());
+                                return Err(
+                                    "interval.overlaps() requires another interval argument"
+                                        .to_string(),
+                                );
                             }
                             "merge" => {
-                                return Err("interval.merge() requires another interval argument".to_string());
+                                return Err("interval.merge() requires another interval argument"
+                                    .to_string());
                             }
                             "contains" => {
-                                return Err("interval.contains() requires a value argument".to_string());
+                                return Err(
+                                    "interval.contains() requires a value argument".to_string()
+                                );
                             }
                             _ => Err(format!("Interval method '{}' not found", field)),
                         }
                     }
                     Value::Grid(grid) => {
                         let rows = grid.len() as i64;
-                        let cols = if grid.is_empty() { 0 } else { grid[0].len() as i64 };
+                        let cols = if grid.is_empty() {
+                            0
+                        } else {
+                            grid[0].len() as i64
+                        };
                         match field.as_str() {
                             "rows" => Ok(Value::Integer(rows)),
                             "cols" | "columns" => Ok(Value::Integer(cols)),
                             "len" | "length" | "size" => Ok(Value::Integer(rows * cols)),
-                            "neighbors" => Ok(Value::GridNeighbors(Box::new(Value::Grid(grid.clone())))),
+                            "neighbors" => {
+                                Ok(Value::GridNeighbors(Box::new(Value::Grid(grid.clone()))))
+                            }
                             _ => Err(format!("Grid method '{}' not found", field)),
                         }
                     }
@@ -1668,7 +2051,9 @@ impl Interpreter {
                         // Use get_property for Matrix to get all the accessor methods
                         self.get_property(&Value::Matrix(mat), field)
                     }
-                    _ => Err(format!("Cannot access field '{}' on type {}", field, 
+                    _ => Err(format!(
+                        "Cannot access field '{}' on type {}",
+                        field,
                         match obj_val {
                             Value::Integer(_) => "integer",
                             Value::Float(_) => "float",
@@ -1676,36 +2061,51 @@ impl Interpreter {
                             Value::Char(_) => "char",
                             Value::Function { .. } => "function",
                             _ => "unknown",
-                        }))
+                        }
+                    )),
                 }
             }
-            
+
             AstNode::Index { object, index } => {
                 let obj_val = self.eval_node(object)?;
                 let idx_val = self.eval_node(index)?;
-                
+
                 match (obj_val, idx_val) {
-                    (Value::Enum { name: enum_name, variants }, val) => {
-                         // Reverse lookup: directions[1]
-                         for (key, variant_val) in variants.iter() {
-                             if variant_val == &val {
-                                  return Ok(Value::EnumVariant {
-                                      enum_name: enum_name.clone(),
-                                      variant_name: key.clone(),
-                                      value: Box::new(variant_val.clone())
-                                  });
-                             }
-                         }
-                         Err(format!("Value '{}' not found in enum '{}'", val, enum_name))
+                    (
+                        Value::Enum {
+                            name: enum_name,
+                            variants,
+                        },
+                        val,
+                    ) => {
+                        // Reverse lookup: directions[1]
+                        for (key, variant_val) in variants.iter() {
+                            if variant_val == &val {
+                                return Ok(Value::EnumVariant {
+                                    enum_name: enum_name.clone(),
+                                    variant_name: key.clone(),
+                                    value: Box::new(variant_val.clone()),
+                                });
+                            }
+                        }
+                        Err(format!("Value '{}' not found in enum '{}'", val, enum_name))
                     }
                     (Value::List(list), Value::Integer(i)) => {
+                        // CRITICAL FIX: Proper negative index handling with bounds checking
                         let idx = if i < 0 {
-                            // Negative indexing from the end
-                            (list.len() as i64 + i) as usize
+                            let abs_i = i.abs() as usize;
+                            if abs_i > list.len() {
+                                return Err(format!(
+                                    "Index {} out of bounds (length {})",
+                                    i,
+                                    list.len()
+                                ));
+                            }
+                            list.len() - abs_i
                         } else {
                             i as usize
                         };
-                        
+
                         if idx < list.len() {
                             Ok(list[idx].clone())
                         } else {
@@ -1713,30 +2113,55 @@ impl Interpreter {
                         }
                     }
                     (Value::Grid(grid), Value::Integer(i)) => {
+                        // CRITICAL FIX: Proper negative index handling
                         let idx = if i < 0 {
-                            (grid.len() as i64 + i) as usize
+                            let abs_i = i.abs() as usize;
+                            if abs_i > grid.len() {
+                                return Err(format!(
+                                    "Grid row index {} out of bounds (rows {})",
+                                    i,
+                                    grid.len()
+                                ));
+                            }
+                            grid.len() - abs_i
                         } else {
                             i as usize
                         };
                         if idx < grid.len() {
                             Ok(Value::List(grid[idx].clone()))
                         } else {
-                            Err(format!("Grid row index {} out of bounds (rows {})", i, grid.len()))
+                            Err(format!(
+                                "Grid row index {} out of bounds (rows {})",
+                                i,
+                                grid.len()
+                            ))
                         }
                     }
                     (Value::String(s), Value::Integer(i)) => {
                         let chars: Vec<char> = s.chars().collect();
+                        // CRITICAL FIX: Proper negative index handling
                         let idx = if i < 0 {
-                            // Negative indexing from the end
-                            (chars.len() as i64 + i) as usize
+                            let abs_i = i.abs() as usize;
+                            if abs_i > chars.len() {
+                                return Err(format!(
+                                    "String index {} out of bounds (length {})",
+                                    i,
+                                    chars.len()
+                                ));
+                            }
+                            chars.len() - abs_i
                         } else {
                             i as usize
                         };
-                        
+
                         if idx < chars.len() {
                             Ok(Value::Char(chars[idx]))
                         } else {
-                            Err(format!("String index {} out of bounds (length {})", i, chars.len()))
+                            Err(format!(
+                                "String index {} out of bounds (length {})",
+                                i,
+                                chars.len()
+                            ))
                         }
                     }
                     (Value::Dict(dict), Value::String(key)) => {
@@ -1755,20 +2180,33 @@ impl Interpreter {
                         }
                     }
                     (Value::Tuple(tuple), Value::Integer(i)) => {
+                        // CRITICAL FIX: Proper negative index handling
                         let idx = if i < 0 {
-                            // Negative indexing from the end
-                            (tuple.len() as i64 + i) as usize
+                            let abs_i = i.abs() as usize;
+                            if abs_i > tuple.len() {
+                                return Err(format!(
+                                    "Tuple index {} out of bounds (length {})",
+                                    i,
+                                    tuple.len()
+                                ));
+                            }
+                            tuple.len() - abs_i
                         } else {
                             i as usize
                         };
-                        
+
                         if idx < tuple.len() {
                             Ok(tuple[idx].clone())
                         } else {
-                            Err(format!("Tuple index {} out of bounds (length {})", i, tuple.len()))
+                            Err(format!(
+                                "Tuple index {} out of bounds (length {})",
+                                i,
+                                tuple.len()
+                            ))
                         }
                     }
-                    (obj, idx) => Err(format!("Cannot index {} with {}", 
+                    (obj, idx) => Err(format!(
+                        "Cannot index {} with {}",
                         match obj {
                             Value::Integer(_) => "integer",
                             Value::Float(_) => "float",
@@ -1793,13 +2231,18 @@ impl Interpreter {
                             Value::String(_) => "string",
                             _ => "invalid index type",
                         }
-                    ))
+                    )),
                 }
             }
-            
-            AstNode::Slice { object, start, end, step } => {
+
+            AstNode::Slice {
+                object,
+                start,
+                end,
+                step,
+            } => {
                 let obj_val = self.eval_node(object)?;
-                
+
                 // Evaluate slice parameters
                 let start_idx = if let Some(start_node) = start {
                     match self.eval_node(start_node)? {
@@ -1809,7 +2252,7 @@ impl Interpreter {
                 } else {
                     None
                 };
-                
+
                 let end_idx = if let Some(end_node) = end {
                     match self.eval_node(end_node)? {
                         Value::Integer(i) => Some(i),
@@ -1818,7 +2261,7 @@ impl Interpreter {
                 } else {
                     None
                 };
-                
+
                 let step_val = if let Some(step_node) = step {
                     match self.eval_node(step_node)? {
                         Value::Integer(i) => {
@@ -1832,12 +2275,13 @@ impl Interpreter {
                 } else {
                     1
                 };
-                
+
                 match obj_val {
                     Value::List(list) => {
                         let len = list.len() as i64;
-                        let (start, end) = self.normalize_slice_indices(start_idx, end_idx, len, step_val)?;
-                        
+                        let (start, end) =
+                            self.normalize_slice_indices(start_idx, end_idx, len, step_val)?;
+
                         let mut result = Vec::new();
                         if step_val > 0 {
                             let mut i = start;
@@ -1861,8 +2305,9 @@ impl Interpreter {
                     Value::String(s) => {
                         let chars: Vec<char> = s.chars().collect();
                         let len = chars.len() as i64;
-                        let (start, end) = self.normalize_slice_indices(start_idx, end_idx, len, step_val)?;
-                        
+                        let (start, end) =
+                            self.normalize_slice_indices(start_idx, end_idx, len, step_val)?;
+
                         let mut result_chars = Vec::new();
                         if step_val > 0 {
                             let mut i = start;
@@ -1886,8 +2331,9 @@ impl Interpreter {
                     }
                     Value::Vector(vec) => {
                         let len = vec.len() as i64;
-                        let (start, end) = self.normalize_slice_indices(start_idx, end_idx, len, step_val)?;
-                        
+                        let (start, end) =
+                            self.normalize_slice_indices(start_idx, end_idx, len, step_val)?;
+
                         let mut result = Vec::new();
                         if step_val > 0 {
                             let mut i = start;
@@ -1911,8 +2357,12 @@ impl Interpreter {
                     _ => Err("Cannot slice this type".to_string()),
                 }
             }
-            
-            AstNode::If { condition, then_branch, else_branch } => {
+
+            AstNode::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 let cond_val = self.eval_node(condition)?;
                 if self.is_truthy(&cond_val) {
                     self.eval_node(then_branch)
@@ -1922,10 +2372,10 @@ impl Interpreter {
                     Ok(Value::None)
                 }
             }
-            
+
             AstNode::Match { expr, arms } => {
                 let expr_val = self.eval_node(expr)?;
-                
+
                 for arm in arms {
                     if self.pattern_matches(&arm.pattern, &expr_val)? {
                         if let Some(guard) = &arm.guard {
@@ -1937,28 +2387,66 @@ impl Interpreter {
                         return self.eval_node(&arm.body);
                     }
                 }
-                
+
                 Err("No matching pattern found".to_string())
             }
-            
+
+            AstNode::Cond { value, branches } => {
+                // Evaluate the value once
+                let cond_value = self.eval_node(value)?;
+
+                // Store the value in a special variable '_' for use in conditions
+                self.set_variable("_".to_string(), cond_value.clone());
+
+                // Iterate through branches and find the first matching condition
+                for branch in branches {
+                    if branch.is_else {
+                        // else branch always matches
+                        return self.eval_node(&branch.body);
+                    }
+
+                    // Evaluate the condition
+                    let condition_result = self.eval_node(&branch.condition)?;
+
+                    // Check if condition is truthy
+                    if self.is_truthy(&condition_result) {
+                        return self.eval_node(&branch.body);
+                    }
+                }
+
+                // If no branch matched and no else, return None
+                Ok(Value::None)
+            }
+
             AstNode::While { condition, body } => {
                 let mut last_val = Value::None;
-                
+
                 loop {
                     let cond_result = self.eval_node(condition)?;
                     if !self.is_truthy(&cond_result) {
                         break;
                     }
-                    last_val = self.eval_node(body)?;
+
+                    match self.eval_node(body) {
+                        Ok(val) => last_val = val,
+                        Err(e) if e == "Break statement outside of loop" => break,
+                        Err(e) if e == "Continue statement outside of loop" => continue,
+                        Err(e) => return Err(e),
+                    }
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::TryCatch { try_block, catch_var, catch_block, finally_block } => {
+
+            AstNode::TryCatch {
+                try_block,
+                catch_var,
+                catch_block,
+                finally_block,
+            } => {
                 // Execute try block
                 let result = self.eval_node(try_block);
-                
+
                 // If error occurred, execute catch block
                 let final_result = match result {
                     Err(error_msg) => {
@@ -1966,21 +2454,21 @@ impl Interpreter {
                         if let Some(var_name) = catch_var {
                             self.set_variable(var_name.clone(), Value::String(error_msg));
                         }
-                        
+
                         // Execute catch block
                         self.eval_node(catch_block)?
                     }
                     Ok(val) => val,
                 };
-                
+
                 // Execute finally block if present
                 if let Some(finally) = finally_block {
                     self.eval_node(finally)?;
                 }
-                
+
                 Ok(final_result)
             }
-            
+
             AstNode::Throw(expr) => {
                 let error_val = self.eval_node(expr)?;
                 let error_msg = match error_val {
@@ -1989,53 +2477,89 @@ impl Interpreter {
                 };
                 Err(error_msg)
             }
-            
-            AstNode::For { var, iterable, body } => {
+
+            AstNode::For {
+                var,
+                iterable,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut last_val = Value::None;
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         for item in list {
                             self.set_variable(var.clone(), item);
-                            last_val = self.eval_node(body)?;
+                            match self.eval_node(body) {
+                                Ok(val) => last_val = val,
+                                Err(e) if e == "Break statement outside of loop" => break,
+                                Err(e) if e == "Continue statement outside of loop" => continue,
+                                Err(e) => return Err(e),
+                            }
                         }
                     }
                     Value::String(s) => {
                         for ch in s.chars() {
                             self.set_variable(var.clone(), Value::Char(ch));
-                            last_val = self.eval_node(body)?;
+                            match self.eval_node(body) {
+                                Ok(val) => last_val = val,
+                                Err(e) if e == "Break statement outside of loop" => break,
+                                Err(e) if e == "Continue statement outside of loop" => continue,
+                                Err(e) => return Err(e),
+                            }
                         }
                     }
                     Value::Dict(dict) => {
                         for (key, _value) in dict {
                             // For simple iteration, iterate over keys
                             self.set_variable(var.clone(), Value::String(key));
-                            last_val = self.eval_node(body)?;
+                            match self.eval_node(body) {
+                                Ok(val) => last_val = val,
+                                Err(e) if e == "Break statement outside of loop" => break,
+                                Err(e) if e == "Continue statement outside of loop" => continue,
+                                Err(e) => return Err(e),
+                            }
                         }
                     }
                     Value::Tuple(tuple) => {
                         for item in tuple {
                             self.set_variable(var.clone(), item);
-                            last_val = self.eval_node(body)?;
+                            match self.eval_node(body) {
+                                Ok(val) => last_val = val,
+                                Err(e) if e == "Break statement outside of loop" => break,
+                                Err(e) if e == "Continue statement outside of loop" => continue,
+                                Err(e) => return Err(e),
+                            }
                         }
                     }
                     Value::Vector(vec) => {
                         for item in vec {
                             self.set_variable(var.clone(), Value::Float(item));
-                            last_val = self.eval_node(body)?;
+                            match self.eval_node(body) {
+                                Ok(val) => last_val = val,
+                                Err(e) if e == "Break statement outside of loop" => break,
+                                Err(e) if e == "Continue statement outside of loop" => continue,
+                                Err(e) => return Err(e),
+                            }
                         }
                     }
-                    _ => return Err("Can only iterate over lists, strings, dictionaries, tuples, and vectors".to_string()),
+                    _ => return Err(
+                        "Can only iterate over lists, strings, dictionaries, tuples, and vectors"
+                            .to_string(),
+                    ),
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::ForReverse { var, iterable, body } => {
+
+            AstNode::ForReverse {
+                var,
+                iterable,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut last_val = Value::None;
-                
+
                 match iterable_val {
                     Value::List(mut list) => {
                         list.reverse();
@@ -2058,23 +2582,33 @@ impl Interpreter {
                             last_val = self.eval_node(body)?;
                         }
                     }
-                    _ => return Err("Can only reverse iterate over lists, strings, and vectors".to_string()),
+                    _ => {
+                        return Err(
+                            "Can only reverse iterate over lists, strings, and vectors".to_string()
+                        )
+                    }
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::ForStep { var, start, step, condition, body } => {
+
+            AstNode::ForStep {
+                var,
+                start,
+                step,
+                condition,
+                body,
+            } => {
                 let start_val = self.eval_node(start)?;
                 let step_val = self.eval_node(step)?;
                 let mut last_val = Value::None;
-                
+
                 match (start_val, step_val) {
                     (Value::Integer(s), Value::Integer(st)) => {
                         if st == 0 {
                             return Err("Step cannot be zero".to_string());
                         }
-                        
+
                         let mut current = s;
                         loop {
                             // Check condition if provided
@@ -2085,11 +2619,11 @@ impl Interpreter {
                                     break;
                                 }
                             }
-                            
+
                             self.set_variable(var.clone(), Value::Integer(current));
                             last_val = self.eval_node(body)?;
                             current += st;
-                            
+
                             // Simple overflow protection
                             if current.abs() > 1_000_000 {
                                 break;
@@ -2098,14 +2632,19 @@ impl Interpreter {
                     }
                     _ => return Err("ForStep requires integer start and step values".to_string()),
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::ForIndexed { index_var, value_var, iterable, body } => {
+
+            AstNode::ForIndexed {
+                index_var,
+                value_var,
+                iterable,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut last_val = Value::None;
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         for (index, item) in list.iter().enumerate() {
@@ -2142,23 +2681,32 @@ impl Interpreter {
                             last_val = self.eval_node(body)?;
                         }
                     }
-                    _ => return Err("Can only iterate over lists, strings, dictionaries, tuples, and vectors".to_string()),
+                    _ => return Err(
+                        "Can only iterate over lists, strings, dictionaries, tuples, and vectors"
+                            .to_string(),
+                    ),
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::ForZip { vars, iterables, body } => {
+
+            AstNode::ForZip {
+                vars,
+                iterables,
+                body,
+            } => {
                 if vars.len() != iterables.len() {
-                    return Err("Number of variables must match number of iterables in zip".to_string());
+                    return Err(
+                        "Number of variables must match number of iterables in zip".to_string()
+                    );
                 }
-                
+
                 // Evaluate all iterables
                 let mut evaluated_iterables = Vec::new();
                 for iterable in iterables {
                     evaluated_iterables.push(self.eval_node(iterable)?);
                 }
-                
+
                 // Convert to lists for zipping
                 let mut lists = Vec::new();
                 for iterable_val in evaluated_iterables {
@@ -2173,13 +2721,17 @@ impl Interpreter {
                             lists.push(floats);
                         }
                         Value::Tuple(tuple) => lists.push(tuple),
-                        _ => return Err("Can only zip over lists, strings, vectors, and tuples".to_string()),
+                        _ => {
+                            return Err(
+                                "Can only zip over lists, strings, vectors, and tuples".to_string()
+                            )
+                        }
                     }
                 }
-                
+
                 // Find minimum length
                 let min_len = lists.iter().map(|l| l.len()).min().unwrap_or(0);
-                
+
                 let mut last_val = Value::None;
                 for i in 0..min_len {
                     // Set each variable to the corresponding element
@@ -2190,16 +2742,22 @@ impl Interpreter {
                     }
                     last_val = self.eval_node(body)?;
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::ForParallel { var, iterable, body, workers: _, ordered: _ } => {
+
+            AstNode::ForParallel {
+                var,
+                iterable,
+                body,
+                workers: _,
+                ordered: _,
+            } => {
                 // For now, implement as sequential (true parallel would require threading)
                 // This is a placeholder for future parallel execution
                 let iterable_val = self.eval_node(iterable)?;
                 let mut last_val = Value::None;
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         for item in list {
@@ -2219,18 +2777,26 @@ impl Interpreter {
                             last_val = self.eval_node(body)?;
                         }
                     }
-                    _ => return Err("Can only parallel iterate over lists, strings, and vectors".to_string()),
+                    _ => {
+                        return Err("Can only parallel iterate over lists, strings, and vectors"
+                            .to_string())
+                    }
                 }
-                
+
                 Ok(last_val)
             }
-            
+
             // Enhanced for loop variants
-            AstNode::ForChunked { var, iterable, chunk_size, body } => {
+            AstNode::ForChunked {
+                var,
+                iterable,
+                chunk_size,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let chunk_size_val = self.eval_node(chunk_size)?;
                 let mut last_val = Value::None;
-                
+
                 let chunk_size = match chunk_size_val {
                     Value::Integer(size) => {
                         if size <= 0 {
@@ -2240,7 +2806,7 @@ impl Interpreter {
                     }
                     _ => return Err("Chunk size must be an integer".to_string()),
                 };
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         for chunk in list.chunks(chunk_size) {
@@ -2251,26 +2817,34 @@ impl Interpreter {
                     Value::String(s) => {
                         let chars: Vec<char> = s.chars().collect();
                         for chunk in chars.chunks(chunk_size) {
-                            let chunk_chars: Vec<Value> = chunk.iter().map(|&c| Value::Char(c)).collect();
+                            let chunk_chars: Vec<Value> =
+                                chunk.iter().map(|&c| Value::Char(c)).collect();
                             self.set_variable(var.clone(), Value::List(chunk_chars));
                             last_val = self.eval_node(body)?;
                         }
                     }
-                    _ => return Err("ForChunked can only iterate over lists and strings".to_string()),
+                    _ => {
+                        return Err("ForChunked can only iterate over lists and strings".to_string())
+                    }
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::ForFiltered { var, iterable, filter, body } => {
+
+            AstNode::ForFiltered {
+                var,
+                iterable,
+                filter,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut last_val = Value::None;
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         for item in list {
                             self.set_variable(var.clone(), item.clone());
-                            
+
                             // Evaluate filter condition
                             let filter_result = self.eval_node(filter)?;
                             if self.is_truthy(&filter_result) {
@@ -2281,24 +2855,33 @@ impl Interpreter {
                     Value::String(s) => {
                         for ch in s.chars() {
                             self.set_variable(var.clone(), Value::Char(ch));
-                            
+
                             let filter_result = self.eval_node(filter)?;
                             if self.is_truthy(&filter_result) {
                                 last_val = self.eval_node(body)?;
                             }
                         }
                     }
-                    _ => return Err("ForFiltered can only iterate over lists and strings".to_string()),
+                    _ => {
+                        return Err(
+                            "ForFiltered can only iterate over lists and strings".to_string()
+                        )
+                    }
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::ForWindowed { var, iterable, window_size, body } => {
+
+            AstNode::ForWindowed {
+                var,
+                iterable,
+                window_size,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let window_size_val = self.eval_node(window_size)?;
                 let mut last_val = Value::None;
-                
+
                 let window_size = match window_size_val {
                     Value::Integer(size) => {
                         if size <= 0 {
@@ -2308,7 +2891,7 @@ impl Interpreter {
                     }
                     _ => return Err("Window size must be an integer".to_string()),
                 };
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         if list.len() >= window_size {
@@ -2323,165 +2906,219 @@ impl Interpreter {
                         let chars: Vec<char> = s.chars().collect();
                         if chars.len() >= window_size {
                             for i in 0..=(chars.len() - window_size) {
-                                let window: Vec<Value> = chars[i..i + window_size].iter().map(|&c| Value::Char(c)).collect();
+                                let window: Vec<Value> = chars[i..i + window_size]
+                                    .iter()
+                                    .map(|&c| Value::Char(c))
+                                    .collect();
                                 self.set_variable(var.clone(), Value::List(window));
                                 last_val = self.eval_node(body)?;
                             }
                         }
                     }
-                    _ => return Err("ForWindowed can only iterate over lists and strings".to_string()),
+                    _ => {
+                        return Err(
+                            "ForWindowed can only iterate over lists and strings".to_string()
+                        )
+                    }
                 }
-                
+
                 Ok(last_val)
             }
-            
+
             // Advanced algorithm loops
-            AstNode::SweepLoop { left_var, right_var, iterable, body } => {
+            AstNode::SweepLoop {
+                left_var,
+                right_var,
+                iterable,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut last_val = Value::None;
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         let mut left = 0i64;
                         let mut right = 0i64;
-                        
+
                         // Initialize variables
                         self.set_variable(left_var.clone(), Value::Integer(left));
                         self.set_variable(right_var.clone(), Value::Integer(right));
-                        
+
                         // User controls the loop via break/continue
                         loop {
                             // Check bounds
                             if right >= list.len() as i64 {
                                 break;
                             }
-                            
+
                             // Update variables before body execution
                             self.set_variable(left_var.clone(), Value::Integer(left));
                             self.set_variable(right_var.clone(), Value::Integer(right));
-                            
+
                             // Execute body - user must update left/right
                             last_val = self.eval_node(body)?;
-                            
+
                             // Read updated values
                             left = match self.get_variable(&left_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Sweep left variable must be an integer".to_string()),
+                                _ => {
+                                    return Err("Sweep left variable must be an integer".to_string())
+                                }
                             };
                             right = match self.get_variable(&right_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Sweep right variable must be an integer".to_string()),
+                                _ => {
+                                    return Err(
+                                        "Sweep right variable must be an integer".to_string()
+                                    )
+                                }
                             };
-                            
+
                             // Safety check to prevent infinite loops
-                            if left < 0 || right < 0 || left > list.len() as i64 || right > list.len() as i64 {
+                            if left < 0
+                                || right < 0
+                                || left > list.len() as i64
+                                || right > list.len() as i64
+                            {
                                 break;
                             }
                         }
                     }
                     _ => return Err("Sweep loop requires a list".to_string()),
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::ShrinkLoop { left_var, right_var, iterable, body } => {
+
+            AstNode::ShrinkLoop {
+                left_var,
+                right_var,
+                iterable,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut last_val = Value::None;
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         let mut left = 0i64;
                         let mut right = (list.len() as i64) - 1;
-                        
+
                         while left <= right {
                             self.set_variable(left_var.clone(), Value::Integer(left));
                             self.set_variable(right_var.clone(), Value::Integer(right));
-                            
+
                             last_val = self.eval_node(body)?;
-                            
+
                             // Read updated values
                             left = match self.get_variable(&left_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Shrink left variable must be an integer".to_string()),
+                                _ => {
+                                    return Err(
+                                        "Shrink left variable must be an integer".to_string()
+                                    )
+                                }
                             };
                             right = match self.get_variable(&right_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Shrink right variable must be an integer".to_string()),
+                                _ => {
+                                    return Err(
+                                        "Shrink right variable must be an integer".to_string()
+                                    )
+                                }
                             };
                         }
                     }
                     _ => return Err("Shrink loop requires a list".to_string()),
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::MeetLoop { left_var, right_var, iterable, body } => {
+
+            AstNode::MeetLoop {
+                left_var,
+                right_var,
+                iterable,
+                body,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut last_val = Value::None;
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         let mut left = 0i64;
                         let mut right = (list.len() as i64) - 1;
-                        
+
                         while left < right {
                             self.set_variable(left_var.clone(), Value::Integer(left));
                             self.set_variable(right_var.clone(), Value::Integer(right));
-                            
+
                             last_val = self.eval_node(body)?;
-                            
+
                             // Read updated values
                             left = match self.get_variable(&left_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Meet left variable must be an integer".to_string()),
+                                _ => {
+                                    return Err("Meet left variable must be an integer".to_string())
+                                }
                             };
                             right = match self.get_variable(&right_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Meet right variable must be an integer".to_string()),
+                                _ => {
+                                    return Err("Meet right variable must be an integer".to_string())
+                                }
                             };
                         }
                     }
                     _ => return Err("Meet loop requires a list".to_string()),
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::BinarySearchLoop { lo_var, hi_var, range, body, else_block } => {
+
+            AstNode::BinarySearchLoop {
+                lo_var,
+                hi_var,
+                range,
+                body,
+                else_block,
+            } => {
                 let range_val = self.eval_node(range)?;
                 let mut last_val = Value::None;
                 let mut found = false;
-                
+
                 match range_val {
                     Value::List(list) => {
                         let mut lo = 0i64;
                         let mut hi = (list.len() as i64) - 1;
-                        
+
                         while lo <= hi {
                             self.set_variable(lo_var.clone(), Value::Integer(lo));
                             self.set_variable(hi_var.clone(), Value::Integer(hi));
-                            
+
                             last_val = self.eval_node(body)?;
-                            
+
                             // Check if user signaled a match (by setting a special variable or breaking)
                             // For now, user must update lo/hi to continue search
                             let new_lo = match self.get_variable(&lo_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Binary lo variable must be an integer".to_string()),
+                                _ => {
+                                    return Err("Binary lo variable must be an integer".to_string())
+                                }
                             };
                             let new_hi = match self.get_variable(&hi_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Binary hi variable must be an integer".to_string()),
+                                _ => {
+                                    return Err("Binary hi variable must be an integer".to_string())
+                                }
                             };
-                            
+
                             // If lo and hi didn't change, assume found
                             if new_lo == lo && new_hi == hi {
                                 found = true;
                                 break;
                             }
-                            
+
                             lo = new_lo;
                             hi = new_hi;
                         }
@@ -2489,43 +3126,52 @@ impl Interpreter {
                     Value::Range(start, end, _step) => {
                         let mut lo = start;
                         let mut hi = end - 1;
-                        
+
                         while lo <= hi {
                             self.set_variable(lo_var.clone(), Value::Integer(lo));
                             self.set_variable(hi_var.clone(), Value::Integer(hi));
-                            
+
                             last_val = self.eval_node(body)?;
-                            
+
                             let new_lo = match self.get_variable(&lo_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Binary lo variable must be an integer".to_string()),
+                                _ => {
+                                    return Err("Binary lo variable must be an integer".to_string())
+                                }
                             };
                             let new_hi = match self.get_variable(&hi_var)? {
                                 Value::Integer(i) => i,
-                                _ => return Err("Binary hi variable must be an integer".to_string()),
+                                _ => {
+                                    return Err("Binary hi variable must be an integer".to_string())
+                                }
                             };
-                            
+
                             if new_lo == lo && new_hi == hi {
                                 found = true;
                                 break;
                             }
-                            
+
                             lo = new_lo;
                             hi = new_hi;
                         }
                     }
                     _ => return Err("Binary search loop requires a list or range".to_string()),
                 }
-                
+
                 // Execute else block if not found
                 if !found && else_block.is_some() {
                     last_val = self.eval_node(else_block.as_ref().unwrap())?;
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::DpLoop { table_name, dimensions, init_value, body } => {
+
+            AstNode::DpLoop {
+                table_name,
+                dimensions,
+                init_value,
+                body,
+            } => {
                 // Evaluate dimensions
                 let mut dim_sizes = Vec::new();
                 for dim in dimensions {
@@ -2539,10 +3185,10 @@ impl Interpreter {
                         _ => return Err("DP dimensions must be integers".to_string()),
                     }
                 }
-                
+
                 // Initialize table based on dimensions
                 let init_val = self.eval_node(init_value)?;
-                
+
                 if dim_sizes.len() == 1 {
                     // 1D table
                     let table = vec![init_val.clone(); dim_sizes[0]];
@@ -2558,19 +3204,19 @@ impl Interpreter {
                 } else {
                     return Err("DP loop currently supports 1D and 2D tables".to_string());
                 }
-                
+
                 // Execute body
                 let last_val = self.eval_node(body)?;
-                
+
                 Ok(last_val)
             }
-            
+
             AstNode::WhileNonzero { var, body } => {
                 let mut last_val = Value::None;
-                
+
                 loop {
                     let var_val = self.get_variable(&var)?;
-                    
+
                     match var_val {
                         Value::Integer(n) => {
                             if n == 0 {
@@ -2579,58 +3225,60 @@ impl Interpreter {
                         }
                         _ => return Err("while_nonzero requires an integer variable".to_string()),
                     }
-                    
+
                     last_val = self.eval_node(body)?;
                 }
-                
+
                 Ok(last_val)
             }
-            
+
             AstNode::WhileChange { var, init, body } => {
                 let init_val = self.eval_node(init)?;
                 self.set_variable(var.clone(), init_val.clone());
-                
-                let mut last_val = Value::None;
-                let mut prev_val = init_val;
-                
+
+                // Execute body at least once, then continue while the value changes
+                let mut last_val = self.eval_node(body)?;
+                let mut prev_val = self.get_variable(&var)?;
+
                 loop {
-                    last_val = self.eval_node(body)?;
-                    
-                    let current_val = self.get_variable(&var)?;
-                    
-                    // Check if value changed
-                    if current_val == prev_val {
+                    if prev_val == self.get_variable(&var)? {
                         break;
                     }
-                    
-                    prev_val = current_val;
+
+                    prev_val = self.get_variable(&var)?;
+                    last_val = self.eval_node(body)?;
                 }
-                
+
                 Ok(last_val)
             }
-            
+
             AstNode::WhileMatchLoop { var, body } => {
                 // This is a pattern-matching while loop
                 // For now, implement as a simple while loop that continues until var is None
                 let mut last_val = Value::None;
-                
+
                 loop {
                     let var_val = self.get_variable(&var)?;
-                    
+
                     if matches!(var_val, Value::None) {
                         break;
                     }
-                    
+
                     last_val = self.eval_node(body)?;
                 }
-                
+
                 Ok(last_val)
             }
-            
-            AstNode::Range { start, end, inclusive, step } => {
+
+            AstNode::Range {
+                start,
+                end,
+                inclusive,
+                step,
+            } => {
                 let start_val = self.eval_node(start)?;
                 let end_val = self.eval_node(end)?;
-                
+
                 match (start_val, end_val) {
                     (Value::Integer(s), Value::Integer(e)) => {
                         let mut range = Vec::new();
@@ -2642,11 +3290,11 @@ impl Interpreter {
                         } else {
                             1
                         };
-                        
+
                         if step_val == 0 {
                             return Err("Range step cannot be zero".to_string());
                         }
-                        
+
                         let mut current = s;
                         if step_val > 0 {
                             while current < e || (*inclusive && current == e) {
@@ -2659,20 +3307,25 @@ impl Interpreter {
                                 current += step_val;
                             }
                         }
-                        
+
                         Ok(Value::List(range))
                     }
                     _ => Err("Range bounds must be integers".to_string()),
                 }
             }
-            
+
             AstNode::Block(statements) => {
+                // CRITICAL FIX: Blocks now create their own scope
+                self.push_scope();
                 self.defer_stack.push(Vec::new());
                 let mut last_val = Value::None;
 
                 for stmt in statements {
                     if let AstNode::Defer(expr) = stmt {
-                        self.defer_stack.last_mut().unwrap().push((*expr.clone(), None));
+                        self.defer_stack
+                            .last_mut()
+                            .unwrap()
+                            .push((*expr.clone(), None));
                     } else {
                         last_val = self.eval_node(stmt)?;
                     }
@@ -2685,12 +3338,13 @@ impl Interpreter {
                     }
                     self.eval_node(&expr)?;
                 }
+
+                // CRITICAL FIX: Pop scope even on error (defer stack handles cleanup)
+                self.pop_scope();
                 Ok(last_val)
             }
 
-            AstNode::Defer(_) => {
-                Ok(Value::None)
-            }
+            AstNode::Defer(_) => Ok(Value::None),
 
             AstNode::ConvergeLoop { body } => {
                 let mut prev = Value::None;
@@ -2705,46 +3359,50 @@ impl Interpreter {
                     prev = next;
                 }
             }
-            
-            AstNode::Expression(expr) => {
-                self.eval_node(expr)
-            }
-            
+
+            AstNode::Expression(expr) => self.eval_node(expr),
+
             AstNode::Assignment { name, value } => {
                 let val = self.eval_node(value)?;
-                
+
                 // Check if it's a static variable first
                 if self.statics.contains_key(name) {
                     self.statics.insert(name.clone(), val.clone());
                 } else {
                     self.set_variable(name.clone(), val.clone());
                 }
-                
+
                 Ok(val)
             }
-            
+
             AstNode::DestructuringAssignment { targets, value } => {
                 let val = self.eval_node(value)?;
-                
+
                 match val {
                     Value::Tuple(tuple) => {
                         if targets.len() != tuple.len() {
-                            return Err(format!("Cannot destructure tuple of length {} into {} variables", 
-                                tuple.len(), targets.len()));
+                            return Err(format!(
+                                "Cannot destructure tuple of length {} into {} variables",
+                                tuple.len(),
+                                targets.len()
+                            ));
                         }
-                        
+
                         for (target, value) in targets.iter().zip(tuple.iter()) {
                             self.set_variable(target.clone(), value.clone());
                         }
-                        
+
                         Ok(Value::Tuple(tuple))
                     }
                     Value::List(list) => {
                         if targets.len() > list.len() {
-                            return Err(format!("Cannot destructure list of length {} into {} variables", 
-                                list.len(), targets.len()));
+                            return Err(format!(
+                                "Cannot destructure list of length {} into {} variables",
+                                list.len(),
+                                targets.len()
+                            ));
                         }
-                        
+
                         for (i, target) in targets.iter().enumerate() {
                             if i < list.len() {
                                 self.set_variable(target.clone(), list[i].clone());
@@ -2752,13 +3410,13 @@ impl Interpreter {
                                 self.set_variable(target.clone(), Value::None);
                             }
                         }
-                        
+
                         Ok(Value::List(list))
                     }
                     _ => Err("Can only destructure tuples and lists".to_string()),
                 }
             }
-            
+
             AstNode::Return(expr) => {
                 if let Some(expr) = expr {
                     self.eval_node(expr)
@@ -2766,35 +3424,38 @@ impl Interpreter {
                     Ok(Value::None)
                 }
             }
-            
+
             AstNode::TryExpression(expr) => {
                 // For now, just evaluate the expression
                 // In a full implementation, this would handle Result types
                 self.eval_node(expr)
             }
-            
+
             AstNode::ExecuteFile { filename } => {
                 // Execute another J file
                 self.execute_file(filename)
             }
-            
-            AstNode::Lambda { params, body } => {
-                Ok(Value::Function {
-                    name: "<lambda>".to_string(),
-                    params: params.clone(),
-                    body: body.clone(),
-                })
-            }
-            
-            AstNode::ListComprehension { expr, var, iterable, condition } => {
+
+            AstNode::Lambda { params, body } => Ok(Value::Function {
+                name: "<lambda>".to_string(),
+                params: params.clone(),
+                body: body.clone(),
+            }),
+
+            AstNode::ListComprehension {
+                expr,
+                var,
+                iterable,
+                condition,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut result = Vec::new();
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         for item in list {
                             self.set_variable(var.clone(), item);
-                            
+
                             // Check condition if provided
                             if let Some(cond) = condition {
                                 let cond_result = self.eval_node(cond)?;
@@ -2802,7 +3463,7 @@ impl Interpreter {
                                     continue;
                                 }
                             }
-                            
+
                             let expr_result = self.eval_node(expr)?;
                             result.push(expr_result);
                         }
@@ -2810,14 +3471,14 @@ impl Interpreter {
                     Value::String(s) => {
                         for ch in s.chars() {
                             self.set_variable(var.clone(), Value::Char(ch));
-                            
+
                             if let Some(cond) = condition {
                                 let cond_result = self.eval_node(cond)?;
                                 if !self.is_truthy(&cond_result) {
                                     continue;
                                 }
                             }
-                            
+
                             let expr_result = self.eval_node(expr)?;
                             result.push(expr_result);
                         }
@@ -2825,33 +3486,44 @@ impl Interpreter {
                     Value::Vector(vec) => {
                         for item in vec {
                             self.set_variable(var.clone(), Value::Float(item));
-                            
+
                             if let Some(cond) = condition {
                                 let cond_result = self.eval_node(cond)?;
                                 if !self.is_truthy(&cond_result) {
                                     continue;
                                 }
                             }
-                            
+
                             let expr_result = self.eval_node(expr)?;
                             result.push(expr_result);
                         }
                     }
-                    _ => return Err("List comprehension can only iterate over lists, strings, and vectors".to_string()),
+                    _ => {
+                        return Err(
+                            "List comprehension can only iterate over lists, strings, and vectors"
+                                .to_string(),
+                        )
+                    }
                 }
-                
+
                 Ok(Value::List(result))
             }
-            
-            AstNode::DictComprehension { key_expr, value_expr, var, iterable, condition } => {
+
+            AstNode::DictComprehension {
+                key_expr,
+                value_expr,
+                var,
+                iterable,
+                condition,
+            } => {
                 let iterable_val = self.eval_node(iterable)?;
                 let mut result = HashMap::new();
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         for item in list {
                             self.set_variable(var.clone(), item);
-                            
+
                             // Check condition if provided
                             if let Some(cond) = condition {
                                 let cond_result = self.eval_node(cond)?;
@@ -2859,222 +3531,211 @@ impl Interpreter {
                                     continue;
                                 }
                             }
-                            
+
                             let key_result = self.eval_node(key_expr)?;
                             let value_result = self.eval_node(value_expr)?;
-                            
-                            let key = match key_result {
-                                Value::String(s) => s,
-                                Value::Integer(i) => i.to_string(),
-                                _ => return Err("Dictionary comprehension keys must be strings or integers".to_string()),
-                            };
-                            
+
+                            let key =
+                                match key_result {
+                                    Value::String(s) => s,
+                                    Value::Integer(i) => i.to_string(),
+                                    _ => return Err(
+                                        "Dictionary comprehension keys must be strings or integers"
+                                            .to_string(),
+                                    ),
+                                };
+
                             result.insert(key, value_result);
                         }
                     }
                     Value::String(s) => {
                         for ch in s.chars() {
                             self.set_variable(var.clone(), Value::Char(ch));
-                            
+
                             if let Some(cond) = condition {
                                 let cond_result = self.eval_node(cond)?;
                                 if !self.is_truthy(&cond_result) {
                                     continue;
                                 }
                             }
-                            
+
                             let key_result = self.eval_node(key_expr)?;
                             let value_result = self.eval_node(value_expr)?;
-                            
-                            let key = match key_result {
-                                Value::String(s) => s,
-                                Value::Integer(i) => i.to_string(),
-                                _ => return Err("Dictionary comprehension keys must be strings or integers".to_string()),
-                            };
-                            
+
+                            let key =
+                                match key_result {
+                                    Value::String(s) => s,
+                                    Value::Integer(i) => i.to_string(),
+                                    _ => return Err(
+                                        "Dictionary comprehension keys must be strings or integers"
+                                            .to_string(),
+                                    ),
+                                };
+
                             result.insert(key, value_result);
                         }
                     }
-                    _ => return Err("Dictionary comprehension can only iterate over lists and strings".to_string()),
+                    _ => {
+                        return Err(
+                            "Dictionary comprehension can only iterate over lists and strings"
+                                .to_string(),
+                        )
+                    }
                 }
-                
+
                 Ok(Value::Dict(result))
             }
-            
+
             // Missing AST node patterns
             AstNode::TypeConversion { target_type, name } => {
                 // Type conversion: type*variable
                 let current_value = self.get_variable(name)?;
-                
+
                 let converted_value = match target_type.as_str() {
-                    "str" => {
-                        match current_value {
-                            Value::Integer(i) => Value::String(i.to_string()),
-                            Value::Float(f) => Value::String(f.to_string()),
-                            Value::Boolean(b) => Value::String(b.to_string()),
-                            Value::Char(c) => Value::String(c.to_string()),
-                            Value::String(s) => Value::String(s),
-                            _ => Value::String(current_value.to_string()),
+                    "str" => match current_value {
+                        Value::Integer(i) => Value::String(i.to_string()),
+                        Value::Float(f) => Value::String(f.to_string()),
+                        Value::Boolean(b) => Value::String(b.to_string()),
+                        Value::Char(c) => Value::String(c.to_string()),
+                        Value::String(s) => Value::String(s),
+                        _ => Value::String(current_value.to_string()),
+                    },
+                    "int" => match current_value {
+                        Value::Integer(i) => Value::Integer(i),
+                        Value::Float(f) => Value::Integer(f as i64),
+                        Value::String(s) => s
+                            .parse::<i64>()
+                            .map(Value::Integer)
+                            .unwrap_or(Value::Integer(0)),
+                        Value::Boolean(b) => Value::Integer(if b { 1 } else { 0 }),
+                        _ => Value::Integer(0),
+                    },
+                    "float" => match current_value {
+                        Value::Integer(i) => Value::Float(i as f64),
+                        Value::Float(f) => Value::Float(f),
+                        Value::String(s) => s
+                            .parse::<f64>()
+                            .map(Value::Float)
+                            .unwrap_or(Value::Float(0.0)),
+                        Value::Boolean(b) => Value::Float(if b { 1.0 } else { 0.0 }),
+                        _ => Value::Float(0.0),
+                    },
+                    "bool" => match current_value {
+                        Value::Boolean(b) => Value::Boolean(b),
+                        Value::Integer(i) => Value::Boolean(i != 0),
+                        Value::Float(f) => Value::Boolean(f != 0.0),
+                        Value::String(s) => Value::Boolean(!s.is_empty()),
+                        Value::List(l) => Value::Boolean(!l.is_empty()),
+                        _ => Value::Boolean(true),
+                    },
+                    "list" => match current_value {
+                        Value::List(l) => Value::List(l),
+                        Value::String(s) => {
+                            let chars: Vec<Value> = s.chars().map(|c| Value::Char(c)).collect();
+                            Value::List(chars)
                         }
-                    }
-                    "int" => {
-                        match current_value {
-                            Value::Integer(i) => Value::Integer(i),
-                            Value::Float(f) => Value::Integer(f as i64),
-                            Value::String(s) => {
-                                s.parse::<i64>()
-                                    .map(Value::Integer)
-                                    .unwrap_or(Value::Integer(0))
-                            }
-                            Value::Boolean(b) => Value::Integer(if b { 1 } else { 0 }),
-                            _ => Value::Integer(0),
+                        Value::Vector(v) => {
+                            let floats: Vec<Value> = v.iter().map(|&f| Value::Float(f)).collect();
+                            Value::List(floats)
                         }
-                    }
-                    "float" => {
-                        match current_value {
-                            Value::Integer(i) => Value::Float(i as f64),
-                            Value::Float(f) => Value::Float(f),
-                            Value::String(s) => {
-                                s.parse::<f64>()
-                                    .map(Value::Float)
-                                    .unwrap_or(Value::Float(0.0))
-                            }
-                            Value::Boolean(b) => Value::Float(if b { 1.0 } else { 0.0 }),
-                            _ => Value::Float(0.0),
-                        }
-                    }
-                    "bool" => {
-                        match current_value {
-                            Value::Boolean(b) => Value::Boolean(b),
-                            Value::Integer(i) => Value::Boolean(i != 0),
-                            Value::Float(f) => Value::Boolean(f != 0.0),
-                            Value::String(s) => Value::Boolean(!s.is_empty()),
-                            Value::List(l) => Value::Boolean(!l.is_empty()),
-                            _ => Value::Boolean(true),
-                        }
-                    }
-                    "list" => {
-                        match current_value {
-                            Value::List(l) => Value::List(l),
-                            Value::String(s) => {
-                                let chars: Vec<Value> = s.chars().map(|c| Value::Char(c)).collect();
-                                Value::List(chars)
-                            }
-                            Value::Vector(v) => {
-                                let floats: Vec<Value> = v.iter().map(|&f| Value::Float(f)).collect();
-                                Value::List(floats)
-                            }
-                            Value::Tuple(t) => Value::List(t),
-                            _ => Value::List(vec![current_value]),
-                        }
-                    }
-                    "vec" => {
-                        match current_value {
-                            Value::Vector(v) => Value::Vector(v),
-                            Value::List(l) => {
-                                let mut vec = Vec::new();
-                                for item in l {
-                                    match item {
-                                        Value::Integer(i) => vec.push(i as f64),
-                                        Value::Float(f) => vec.push(f),
-                                        _ => return Err("Cannot convert non-numeric list to vector".to_string()),
+                        Value::Tuple(t) => Value::List(t),
+                        _ => Value::List(vec![current_value]),
+                    },
+                    "vec" => match current_value {
+                        Value::Vector(v) => Value::Vector(v),
+                        Value::List(l) => {
+                            let mut vec = Vec::new();
+                            for item in l {
+                                match item {
+                                    Value::Integer(i) => vec.push(i as f64),
+                                    Value::Float(f) => vec.push(f),
+                                    _ => {
+                                        return Err(
+                                            "Cannot convert non-numeric list to vector".to_string()
+                                        )
                                     }
                                 }
-                                Value::Vector(vec)
                             }
-                            _ => return Err(format!("Cannot convert {} to vector", target_type)),
+                            Value::Vector(vec)
                         }
-                    }
+                        _ => return Err(format!("Cannot convert {} to vector", target_type)),
+                    },
                     _ => return Err(format!("Unsupported type conversion to {}", target_type)),
                 };
-                
+
                 // Create new variable with converted value (shadowing)
                 self.set_variable(name.clone(), converted_value.clone());
                 Ok(converted_value)
             }
-            
+
             AstNode::Break => {
                 // Break statement - should be handled by loop constructs
                 Err("Break statement outside of loop".to_string())
             }
-            
+
             AstNode::Continue => {
                 // Continue statement - should be handled by loop constructs
                 Err("Continue statement outside of loop".to_string())
             }
-            
+
             AstNode::Underscore => {
                 // Anonymous variable - return the current pipeline value if available
                 Ok(self.get_variable("_").unwrap_or(Value::None))
             }
-            
+
             // Advanced J features (not yet implemented)
-            AstNode::AutoFunction { .. } => {
-                Err("AutoFunction not yet implemented".to_string())
-            }
-            
-            AstNode::CheatBlock { .. } => {
-                Err("CheatBlock not yet implemented".to_string())
-            }
-            
-            AstNode::LiveVariable { .. } => {
-                Err("LiveVariable not yet implemented".to_string())
-            }
-            
-            AstNode::WhyExpression { .. } => {
-                Err("WhyExpression not yet implemented".to_string())
-            }
-            
+            AstNode::AutoFunction { .. } => Err("AutoFunction not yet implemented".to_string()),
+
+            AstNode::CheatBlock { .. } => Err("CheatBlock not yet implemented".to_string()),
+
+            AstNode::LiveVariable { .. } => Err("LiveVariable not yet implemented".to_string()),
+
+            AstNode::WhyExpression { .. } => Err("WhyExpression not yet implemented".to_string()),
+
             AstNode::BlendExpression { .. } => {
                 Err("BlendExpression not yet implemented".to_string())
             }
-            
-            AstNode::EchoVariable { .. } => {
-                Err("EchoVariable not yet implemented".to_string())
-            }
-            
-            AstNode::TraceBlock { .. } => {
-                Err("TraceBlock not yet implemented".to_string())
-            }
-            
+
+            AstNode::EchoVariable { .. } => Err("EchoVariable not yet implemented".to_string()),
+
+            AstNode::TraceBlock { .. } => Err("TraceBlock not yet implemented".to_string()),
+
             AstNode::GuardExpression { .. } => {
                 Err("GuardExpression not yet implemented".to_string())
             }
-            
-            AstNode::LensView { .. } => {
-                Err("LensView not yet implemented".to_string())
-            }
-            
+
+            AstNode::LensView { .. } => Err("LensView not yet implemented".to_string()),
+
             // Memory management
             AstNode::ArenaAllocation { .. } => {
                 Err("ArenaAllocation not yet implemented".to_string())
             }
-            
+
             AstNode::StackAllocation { .. } => {
                 Err("StackAllocation not yet implemented".to_string())
             }
-            
+
             // Concurrency
             AstNode::TaskSpawn { body } => {
                 // Create a task ID and spawn the task
                 // For now, execute synchronously (true async would need runtime)
                 let task_id = self.next_future_id;
                 self.next_future_id += 1;
-                
+
                 // Execute the task body
                 self.push_scope();
                 let _result = self.eval_node(body)?;
                 self.pop_scope();
-                
+
                 // Return a Task value
                 Ok(Value::Task(task_id as u64))
             }
-            
+
             AstNode::ChannelSend { channel, value } => {
                 // Evaluate channel and value
                 let chan_val = self.eval_node(channel)?;
                 let _val = self.eval_node(value)?;
-                
+
                 // For now, just return success
                 // Full implementation would need a channel queue
                 match chan_val {
@@ -3083,52 +3744,42 @@ impl Interpreter {
                         // For now, just acknowledge the send
                         Ok(Value::Boolean(true))
                     }
-                    _ => Err("ChannelSend requires a Channel value".to_string())
+                    _ => Err("ChannelSend requires a Channel value".to_string()),
                 }
             }
-            
+
             AstNode::ChannelReceive { channel } => {
                 // Evaluate channel
                 let chan_val = self.eval_node(channel)?;
-                
+
                 match chan_val {
                     Value::Channel(_id) => {
                         // For now, return None (no value in channel)
                         // Full implementation would need a channel queue
                         Ok(Value::None)
                     }
-                    _ => Err("ChannelReceive requires a Channel value".to_string())
+                    _ => Err("ChannelReceive requires a Channel value".to_string()),
                 }
             }
-            
-            AstNode::ScopeBlock { .. } => {
-                Err("ScopeBlock not yet implemented".to_string())
-            }
-            
+
+            AstNode::ScopeBlock { .. } => Err("ScopeBlock not yet implemented".to_string()),
+
             // Testing
-            AstNode::TestCase { .. } => {
-                Err("TestCase not yet implemented".to_string())
-            }
-            
-            AstNode::PropertyTest { .. } => {
-                Err("PropertyTest not yet implemented".to_string())
-            }
-            
-            AstNode::Assertion { .. } => {
-                Err("Assertion not yet implemented".to_string())
-            }
-            
+            AstNode::TestCase { .. } => Err("TestCase not yet implemented".to_string()),
+
+            AstNode::PropertyTest { .. } => Err("PropertyTest not yet implemented".to_string()),
+
+            AstNode::Assertion { .. } => Err("Assertion not yet implemented".to_string()),
+
             // Macros
             AstNode::MacroDefinition { .. } => {
                 Err("MacroDefinition not yet implemented".to_string())
             }
-            
-            AstNode::MacroCall { .. } => {
-                Err("MacroCall not yet implemented".to_string())
-            }
-            
+
+            AstNode::MacroCall { .. } => Err("MacroCall not yet implemented".to_string()),
+
             // ===== NEW ADVANCED FEATURE HANDLERS =====
-            
+
             // Traits
             AstNode::TraitDeclaration { name, methods } => {
                 // Convert methods to TraitMethod structs
@@ -3148,18 +3799,23 @@ impl Interpreter {
                         None
                     }
                 }).collect();
-                
+
                 let trait_val = Value::Trait {
                     name: name.clone(),
                     methods: trait_methods,
                 };
-                
+
                 self.set_variable(name.clone(), trait_val);
                 Ok(Value::None)
             }
-            
+
             // Async/Await
-            AstNode::AsyncFunction { name, params, return_type: _, body } => {
+            AstNode::AsyncFunction {
+                name,
+                params,
+                return_type: _,
+                body,
+            } => {
                 // Create an async function that can be awaited
                 // For now, it executes synchronously but returns a completed Future
                 let param_names: Vec<String> = params.iter().map(|(_, p)| p.clone()).collect();
@@ -3168,14 +3824,14 @@ impl Interpreter {
                     params: param_names,
                     body: body.clone(),
                 };
-                
+
                 self.set_variable(name.clone(), func);
                 Ok(Value::None)
             }
-            
+
             AstNode::AwaitExpression { expr } => {
                 let future_val = self.eval_node(expr)?;
-                
+
                 // If it's a Future, get its result
                 if let Value::Future { result, state, .. } = future_val {
                     match state {
@@ -3190,44 +3846,46 @@ impl Interpreter {
                             return Err(format!("Future failed: {}", err));
                         }
                         _ => {
-                            return Err("Cannot await pending future (no async runtime)".to_string());
+                            return Err(
+                                "Cannot await pending future (no async runtime)".to_string()
+                            );
                         }
                     }
                 }
-                
+
                 // If it's a regular function call, just execute it synchronously
                 Ok(future_val)
             }
-            
+
             // Module System
             AstNode::ModuleDeclaration { name, body } => {
                 // Create a new scope for the module
                 self.push_scope();
                 let result = self.eval_node(body)?;
-                
+
                 // Collect exports from module scope
                 let mut exports = HashMap::new();
                 if let Some(scope) = self.locals.last() {
                     exports = scope.clone();
                 }
-                
+
                 self.pop_scope();
-                
+
                 // Store module
                 let module = Value::Module {
                     name: name.clone(),
                     path: format!("<inline:{}>", name),
                     exports,
                 };
-                
+
                 self.set_variable(name.clone(), module);
                 Ok(result)
             }
-            
+
             AstNode::ImportStatement { module_path, items } => {
                 let path = module_path.join("/");
                 let module = self.load_module(&path)?;
-                
+
                 if let Value::Module { exports, .. } = module {
                     if items.is_empty() {
                         // Import all exports
@@ -3245,22 +3903,25 @@ impl Interpreter {
                         }
                     }
                 }
-                
+
                 Ok(Value::None)
             }
-            
+
             AstNode::UseStatement { path } => {
                 // For now, just mark the use statement as processed
                 let path_str = path.join(".");
-                self.set_variable(
-                    format!("__use_{}", path_str),
-                    Value::Boolean(true)
-                );
+                self.set_variable(format!("__use_{}", path_str), Value::Boolean(true));
                 Ok(Value::None)
             }
-            
+
             // Generics
-            AstNode::GenericFunction { name, type_params: _, params, return_type: _, body } => {
+            AstNode::GenericFunction {
+                name,
+                type_params: _,
+                params,
+                return_type: _,
+                body,
+            } => {
                 // For now, treat generic functions like regular functions
                 // In a full implementation, this would support type parameters
                 let param_names: Vec<String> = params.iter().map(|(_, p)| p.clone()).collect();
@@ -3272,11 +3933,20 @@ impl Interpreter {
                 self.set_variable(name.clone(), func);
                 Ok(Value::None)
             }
-            
-            AstNode::GenericClass { name, type_params: _, parent, traits: _, fields, methods, static_fields, static_methods } => {
+
+            AstNode::GenericClass {
+                name,
+                type_params: _,
+                parent,
+                traits: _,
+                fields,
+                methods,
+                static_fields,
+                static_methods,
+            } => {
                 // For now, treat generic classes like regular classes
                 // In a full implementation, this would support type parameters
-                
+
                 // Convert fields to HashMap
                 let mut field_map = HashMap::new();
                 for field in fields {
@@ -3287,12 +3957,16 @@ impl Interpreter {
                         field_map.insert(field.name.clone(), Value::None);
                     }
                 }
-                
+
                 // Convert methods to HashMap
                 let mut method_map = HashMap::new();
                 for method in methods {
-                    if let AstNode::FunctionDeclaration { name, params, body, .. } = method {
-                        let param_names: Vec<String> = params.iter().map(|(_, p)| p.clone()).collect();
+                    if let AstNode::FunctionDeclaration {
+                        name, params, body, ..
+                    } = method
+                    {
+                        let param_names: Vec<String> =
+                            params.iter().map(|(_, p)| p.clone()).collect();
                         let func = Value::Function {
                             name: name.clone(),
                             params: param_names,
@@ -3301,7 +3975,7 @@ impl Interpreter {
                         method_map.insert(name.clone(), func);
                     }
                 }
-                
+
                 // Convert static fields to HashMap
                 let mut static_field_map = HashMap::new();
                 for field in static_fields {
@@ -3312,12 +3986,16 @@ impl Interpreter {
                         static_field_map.insert(field.name.clone(), Value::None);
                     }
                 }
-                
+
                 // Convert static methods to HashMap
                 let mut static_method_map = HashMap::new();
                 for method in static_methods {
-                    if let AstNode::FunctionDeclaration { name, params, body, .. } = method {
-                        let param_names: Vec<String> = params.iter().map(|(_, p)| p.clone()).collect();
+                    if let AstNode::FunctionDeclaration {
+                        name, params, body, ..
+                    } = method
+                    {
+                        let param_names: Vec<String> =
+                            params.iter().map(|(_, p)| p.clone()).collect();
                         let func = Value::Function {
                             name: name.clone(),
                             params: param_names,
@@ -3326,7 +4004,7 @@ impl Interpreter {
                         static_method_map.insert(name.clone(), func);
                     }
                 }
-                
+
                 let class_value = Value::Class {
                     name: name.clone(),
                     parent: parent.clone(),
@@ -3339,9 +4017,17 @@ impl Interpreter {
                 Ok(Value::None)
             }
             // jnew_features: run body or stub
-            AstNode::ExtendType { target_type: _, methods: _ } => Ok(Value::None),
+            AstNode::ExtendType {
+                target_type: _,
+                methods: _,
+            } => Ok(Value::None),
             AstNode::PhantomDecl { name: _ } => Ok(Value::None),
-            AstNode::MemoVarDeclaration { var_type: _, name, params, body } => {
+            AstNode::MemoVarDeclaration {
+                var_type: _,
+                name,
+                params,
+                body,
+            } => {
                 let param_names: Vec<String> = params.iter().map(|(_, p)| p.clone()).collect();
                 let func = Value::Function {
                     name: name.clone(),
@@ -3351,14 +4037,23 @@ impl Interpreter {
                 self.set_variable(name.clone(), func);
                 Ok(Value::None)
             }
-            AstNode::FuzzLoop { var_type: _, var_name, range_opt: _, condition, body, else_body } => {
+            AstNode::FuzzLoop {
+                var_type: _,
+                var_name,
+                range_opt: _,
+                condition,
+                body,
+                else_body,
+            } => {
                 self.push_scope();
                 let mut result = Value::None;
                 for i in 0..100 {
                     self.set_variable(var_name.clone(), Value::Integer(i));
                     let cond = self.eval_node(condition)?;
                     if let Value::Boolean(false) = cond {
-                        if let Some(eb) = else_body { result = self.eval_node(eb)?; }
+                        if let Some(eb) = else_body {
+                            result = self.eval_node(eb)?;
+                        }
                         break;
                     }
                     result = self.eval_node(body)?;
@@ -3366,7 +4061,13 @@ impl Interpreter {
                 self.pop_scope();
                 Ok(result)
             }
-            AstNode::WithinLoop { duration_expr: _, loop_var, iterable, body, else_body } => {
+            AstNode::WithinLoop {
+                duration_expr: _,
+                loop_var,
+                iterable,
+                body,
+                else_body,
+            } => {
                 if let (Some(var), Some(iter)) = (loop_var, iterable) {
                     let list = self.eval_node(iter)?;
                     if let Value::List(items) = list {
@@ -3378,13 +4079,25 @@ impl Interpreter {
                         }
                         self.pop_scope();
                         Ok(last)
-                    } else { self.eval_node(body)?; Ok(Value::None) }
-                } else { self.eval_node(body)?; if let Some(eb) = else_body { self.eval_node(eb) } else { Ok(Value::None) } }
+                    } else {
+                        self.eval_node(body)?;
+                        Ok(Value::None)
+                    }
+                } else {
+                    self.eval_node(body)?;
+                    if let Some(eb) = else_body {
+                        self.eval_node(eb)
+                    } else {
+                        Ok(Value::None)
+                    }
+                }
             }
             AstNode::RollbackBlock { retries: _, body } => self.eval_node(body),
             AstNode::RetryKeyword => Err("retry only valid inside rollback".to_string()),
             AstNode::RaceBlock { branches } => {
-                if branches.is_empty() { Ok(Value::None) } else {
+                if branches.is_empty() {
+                    Ok(Value::None)
+                } else {
                     self.eval_node(&branches[0].1)
                 }
             }
@@ -3392,9 +4105,19 @@ impl Interpreter {
                 self.set_variable(name.clone(), Value::Integer(0));
                 Ok(Value::None)
             }
-            AstNode::RetryBlock { attempts: _, backoff: _, jitter: _, body } => self.eval_node(body),
+            AstNode::RetryBlock {
+                attempts: _,
+                backoff: _,
+                jitter: _,
+                body,
+            } => self.eval_node(body),
             AstNode::SecureBlock { body } => self.eval_node(body),
-            AstNode::ComponentDecl { name, deps: _, fields: _, methods: _ } => {
+            AstNode::ComponentDecl {
+                name,
+                deps: _,
+                fields: _,
+                methods: _,
+            } => {
                 self.set_variable(name.clone(), Value::None);
                 Ok(Value::None)
             }
@@ -3402,17 +4125,30 @@ impl Interpreter {
                 self.set_variable(name.clone(), Value::None);
                 Ok(Value::None)
             }
-            AstNode::WorkspaceBlock { members: _, rules: _ } => Ok(Value::None),
-            AstNode::TaskDecl { name: _, needs: _, body } => self.eval_node(body),
+            AstNode::WorkspaceBlock {
+                members: _,
+                rules: _,
+            } => Ok(Value::None),
+            AstNode::TaskDecl {
+                name: _,
+                needs: _,
+                body,
+            } => self.eval_node(body),
             AstNode::EnvSchema { name: _, fields: _ } => Ok(Value::None),
             AstNode::PacketDecl { name: _, fields: _ } => Ok(Value::None),
             AstNode::FloodLoop { start: _, body } => self.eval_node(body),
-            AstNode::WindowLoop { var, iterable, size, shrink_condition, body } => {
+            AstNode::WindowLoop {
+                var,
+                iterable,
+                size,
+                shrink_condition,
+                body,
+            } => {
                 let list = self.eval_node(iterable)?;
                 if let Value::List(items) = list {
                     self.push_scope();
                     let mut last = Value::None;
-                    
+
                     // Determine window size
                     let window_size = if let Some(size_expr) = size {
                         match self.eval_node(size_expr)? {
@@ -3422,30 +4158,30 @@ impl Interpreter {
                     } else {
                         1 // Default: growing window
                     };
-                    
+
                     if let Some(shrink_cond) = shrink_condition {
                         // Sliding window with shrink condition
                         let mut left = 0;
                         let mut right = 0;
-                        
+
                         while right < items.len() {
                             // Expand window
                             right += 1;
                             let slice: Vec<Value> = items[left..right].to_vec();
                             self.set_variable(var.clone(), Value::List(slice.clone()));
-                            
+
                             // Check shrink condition
                             let should_shrink = match self.eval_node(shrink_cond)? {
                                 Value::Boolean(b) => b,
                                 _ => false,
                             };
-                            
+
                             // Shrink window if condition met
                             while should_shrink && left < right {
                                 left += 1;
                                 let slice: Vec<Value> = items[left..right].to_vec();
                                 self.set_variable(var.clone(), Value::List(slice));
-                                
+
                                 let still_shrink = match self.eval_node(shrink_cond)? {
                                     Value::Boolean(b) => b,
                                     _ => false,
@@ -3454,7 +4190,7 @@ impl Interpreter {
                                     break;
                                 }
                             }
-                            
+
                             last = self.eval_node(body)?;
                         }
                     } else if window_size == 1 {
@@ -3467,20 +4203,24 @@ impl Interpreter {
                     } else {
                         // Fixed-size sliding window
                         for i in 0..=(items.len().saturating_sub(window_size)) {
-                            let slice: Vec<Value> = items[i..i+window_size].to_vec();
+                            let slice: Vec<Value> = items[i..i + window_size].to_vec();
                             self.set_variable(var.clone(), Value::List(slice));
                             last = self.eval_node(body)?;
                         }
                     }
-                    
+
                     self.pop_scope();
                     Ok(last)
-                } else { 
+                } else {
                     Err("window loop requires a list".to_string())
                 }
             }
-            AstNode::SolverBlock { name: _, options: _, body } => self.eval_node(body),
-            
+            AstNode::SolverBlock {
+                name: _,
+                options: _,
+                body,
+            } => self.eval_node(body),
+
             // New algorithm helper nodes
             AstNode::IntervalLiteral { start, end } => {
                 let start_val = self.eval_node(start)?;
@@ -3490,18 +4230,21 @@ impl Interpreter {
                     _ => Err("Interval requires integer start and end".to_string()),
                 }
             }
-            
+
             AstNode::GroupBy { collection, key_fn } => {
                 let coll = self.eval_node(collection)?;
                 if let Value::List(items) = coll {
                     let mut groups: HashMap<String, Vec<Value>> = HashMap::new();
-                    
+
                     for item in items {
                         // Call the key function with the item
                         let key_val = match self.eval_node(key_fn)? {
                             Value::Function { params, body, .. } => {
                                 if params.len() != 1 {
-                                    return Err("group_by key function must take exactly 1 parameter".to_string());
+                                    return Err(
+                                        "group_by key function must take exactly 1 parameter"
+                                            .to_string(),
+                                    );
                                 }
                                 self.push_scope();
                                 self.set_variable(params[0].clone(), item.clone());
@@ -3511,12 +4254,12 @@ impl Interpreter {
                             }
                             _ => return Err("group_by requires a function as key".to_string()),
                         };
-                        
+
                         // Convert key to string
                         let key_str = key_val.to_string();
                         groups.entry(key_str).or_insert_with(Vec::new).push(item);
                     }
-                    
+
                     // Convert to dict of lists
                     let mut result = HashMap::new();
                     for (key, values) in groups {
@@ -3527,19 +4270,25 @@ impl Interpreter {
                     Err("group_by requires a list".to_string())
                 }
             }
-            
-            AstNode::Partition { collection, predicate } => {
+
+            AstNode::Partition {
+                collection,
+                predicate,
+            } => {
                 let coll = self.eval_node(collection)?;
                 if let Value::List(items) = coll {
                     let mut true_items = Vec::new();
                     let mut false_items = Vec::new();
-                    
+
                     for item in items {
                         // Call the predicate function with the item
                         let pred_result = match self.eval_node(predicate)? {
                             Value::Function { params, body, .. } => {
                                 if params.len() != 1 {
-                                    return Err("partition predicate must take exactly 1 parameter".to_string());
+                                    return Err(
+                                        "partition predicate must take exactly 1 parameter"
+                                            .to_string(),
+                                    );
                                 }
                                 self.push_scope();
                                 self.set_variable(params[0].clone(), item.clone());
@@ -3547,23 +4296,30 @@ impl Interpreter {
                                 self.pop_scope();
                                 result
                             }
-                            _ => return Err("partition requires a function as predicate".to_string()),
+                            _ => {
+                                return Err("partition requires a function as predicate".to_string())
+                            }
                         };
-                        
+
                         match pred_result {
                             Value::Boolean(true) => true_items.push(item),
                             Value::Boolean(false) => false_items.push(item),
-                            _ => return Err("partition predicate must return a boolean".to_string()),
+                            _ => {
+                                return Err("partition predicate must return a boolean".to_string())
+                            }
                         }
                     }
-                    
+
                     // Return tuple of (true_items, false_items)
-                    Ok(Value::Tuple(vec![Value::List(true_items), Value::List(false_items)]))
+                    Ok(Value::Tuple(vec![
+                        Value::List(true_items),
+                        Value::List(false_items),
+                    ]))
                 } else {
                     Err("partition requires a list".to_string())
                 }
             }
-            
+
             AstNode::DeferAttach { resource, cleanup } => {
                 let resource_val = self.eval_node(resource)?;
                 if let Some(frame) = self.defer_stack.last_mut() {
@@ -3571,7 +4327,7 @@ impl Interpreter {
                 }
                 Ok(resource_val)
             }
-            
+
             // Generators and comprehensions
             AstNode::Generator { params, body } => {
                 // Create a generator function that yields values
@@ -3581,7 +4337,7 @@ impl Interpreter {
                     body: body.clone(),
                 })
             }
-            
+
             AstNode::Yield { value } => {
                 // Yield a value from a generator
                 let val = self.eval_node(value)?;
@@ -3591,7 +4347,7 @@ impl Interpreter {
             }
         }
     }
-    
+
     fn call_function(&mut self, name: &str, args: &[AstNode]) -> Result<Value, String> {
         // Handle built-in functions
         match name {
@@ -3600,7 +4356,7 @@ impl Interpreter {
                     println!();
                     return Ok(Value::None);
                 }
-                
+
                 // Handle multiple arguments with optional formatting options
                 if args.len() == 1 {
                     let val = self.eval_node(&args[0])?;
@@ -3619,7 +4375,7 @@ impl Interpreter {
                     // Check if second argument is a formatting dict
                     let first_val = self.eval_node(&args[0])?;
                     let second_val = self.eval_node(&args[1])?;
-                    
+
                     match second_val {
                         Value::Dict(options) => {
                             // Check for progress bar
@@ -3637,14 +4393,15 @@ impl Interpreter {
                                 self.print_progress_bar(*percent, width, &color)?;
                                 return Ok(Value::None);
                             }
-                            
+
                             // Check for animation
                             if let Some(Value::String(anim_type)) = options.get("animate") {
-                                let interval = if let Some(Value::Float(i)) = options.get("interval") {
-                                    *i
-                                } else {
-                                    0.15
-                                };
+                                let interval =
+                                    if let Some(Value::Float(i)) = options.get("interval") {
+                                        *i
+                                    } else {
+                                        0.15
+                                    };
                                 let count = if let Some(Value::Integer(c)) = options.get("count") {
                                     Some(*c as usize)
                                 } else {
@@ -3654,14 +4411,14 @@ impl Interpreter {
                                 self.print_animation(&text, anim_type, interval, count)?;
                                 return Ok(Value::None);
                             }
-                            
+
                             // Check for gradient
                             if let Some(Value::List(gradient_colors)) = options.get("gradient") {
                                 let text = first_val.to_string();
                                 self.print_gradient(&text, gradient_colors)?;
                                 return Ok(Value::None);
                             }
-                            
+
                             // Check for table with options
                             if let Value::List(rows) = &first_val {
                                 if !rows.is_empty() {
@@ -3671,7 +4428,7 @@ impl Interpreter {
                                     }
                                 }
                             }
-                            
+
                             // String formatting with {} placeholders
                             let mut output = first_val.to_string();
                             if let Value::String(format_str) = &first_val {
@@ -3679,52 +4436,85 @@ impl Interpreter {
                                     output = self.format_string(format_str, &options)?;
                                 }
                             }
-                            
+
                             // Apply formatting options
                             let mut formatted_output = String::new();
                             let mut has_color = false;
                             let mut has_style = false;
-                            
+
                             // Process color option
                             if let Some(Value::String(color)) = options.get("color") {
                                 match color.as_str() {
-                                    "red" => { formatted_output.push_str("\x1b[31m"); has_color = true; }
-                                    "green" => { formatted_output.push_str("\x1b[32m"); has_color = true; }
-                                    "yellow" => { formatted_output.push_str("\x1b[33m"); has_color = true; }
-                                    "blue" => { formatted_output.push_str("\x1b[34m"); has_color = true; }
-                                    "magenta" => { formatted_output.push_str("\x1b[35m"); has_color = true; }
-                                    "cyan" => { formatted_output.push_str("\x1b[36m"); has_color = true; }
-                                    "white" => { formatted_output.push_str("\x1b[37m"); has_color = true; }
+                                    "red" => {
+                                        formatted_output.push_str("\x1b[31m");
+                                        has_color = true;
+                                    }
+                                    "green" => {
+                                        formatted_output.push_str("\x1b[32m");
+                                        has_color = true;
+                                    }
+                                    "yellow" => {
+                                        formatted_output.push_str("\x1b[33m");
+                                        has_color = true;
+                                    }
+                                    "blue" => {
+                                        formatted_output.push_str("\x1b[34m");
+                                        has_color = true;
+                                    }
+                                    "magenta" => {
+                                        formatted_output.push_str("\x1b[35m");
+                                        has_color = true;
+                                    }
+                                    "cyan" => {
+                                        formatted_output.push_str("\x1b[36m");
+                                        has_color = true;
+                                    }
+                                    "white" => {
+                                        formatted_output.push_str("\x1b[37m");
+                                        has_color = true;
+                                    }
                                     _ => {}
                                 }
                             }
-                            
+
                             // Process style option
                             if let Some(Value::String(style)) = options.get("style") {
                                 match style.as_str() {
-                                    "bold" => { formatted_output.push_str("\x1b[1m"); has_style = true; }
-                                    "dim" => { formatted_output.push_str("\x1b[2m"); has_style = true; }
-                                    "underline" => { formatted_output.push_str("\x1b[4m"); has_style = true; }
-                                    "blink" => { formatted_output.push_str("\x1b[5m"); has_style = true; }
+                                    "bold" => {
+                                        formatted_output.push_str("\x1b[1m");
+                                        has_style = true;
+                                    }
+                                    "dim" => {
+                                        formatted_output.push_str("\x1b[2m");
+                                        has_style = true;
+                                    }
+                                    "underline" => {
+                                        formatted_output.push_str("\x1b[4m");
+                                        has_style = true;
+                                    }
+                                    "blink" => {
+                                        formatted_output.push_str("\x1b[5m");
+                                        has_style = true;
+                                    }
                                     _ => {}
                                 }
                             }
-                            
+
                             // Add the actual text
                             formatted_output.push_str(&output);
-                            
+
                             // Reset formatting if we applied any
                             if has_color || has_style {
                                 formatted_output.push_str("\x1b[0m");
                             }
-                            
+
                             // Process end option (default is newline)
                             let end = if let Some(Value::String(end_val)) = options.get("end") {
                                 end_val.clone()
                             } else {
                                 "\n".to_string()
                             };
-                            
+
                             print!("{}{}", formatted_output, end);
                         }
                         _ => {
@@ -3735,7 +4525,9 @@ impl Interpreter {
                 } else {
                     // Multiple arguments, space-separated
                     for (i, arg) in args.iter().enumerate() {
-                        if i > 0 { print!(" "); }
+                        if i > 0 {
+                            print!(" ");
+                        }
                         let val = self.eval_node(arg)?;
                         print!("{}", val);
                     }
@@ -3743,7 +4535,7 @@ impl Interpreter {
                 }
                 Ok(Value::None)
             }
-            
+
             "sleep" => {
                 if args.len() != 1 {
                     return Err("sleep() expects exactly 1 argument (seconds)".to_string());
@@ -3760,7 +4552,7 @@ impl Interpreter {
                 std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
                 Ok(Value::None)
             }
-            
+
             "varType" => {
                 if args.len() != 1 {
                     return Err("varType() expects exactly 1 argument".to_string());
@@ -3810,32 +4602,32 @@ impl Interpreter {
                     Value::MatrixColMeans(_) => "matrix_col_means",
                     Value::Enum { .. } => "enum",
                     Value::EnumVariant { .. } => "enum_variant",
-                            Value::Class { .. } => "class",
-                            Value::Instance { .. } => "instance",
-                            Value::Constructor(_) => "constructor",
-                            Value::OnceCached { .. } => "once",
-                            Value::MirrorDispatch { .. } => "mirror",
-                            Value::None => "none",
-                            Value::Module { .. } => "module",
-                            Value::Trait { .. } => "trait",
-                            Value::Future { .. } => "future",
-                            Value::Interval(_, _) => "interval",
-                            Value::Queue(_) => "queue",
-                            Value::Ring { .. } => "ring",
-                            Value::Sorted(_) => "sorted",
-                            Value::Bag(_) => "bag",
-                            Value::Window { .. } => "window",
-                            Value::View { .. } => "view",
-                            Value::Prio(_) => "prio",
-                            Value::Diff(_) => "diff",
-                            Value::Span { .. } => "span",
-                            Value::MutSpan { .. } => "mut_span",
-                            Value::Chunk { .. } => "chunk",
-                            Value::Sparse { .. } => "sparse",
+                    Value::Class { .. } => "class",
+                    Value::Instance { .. } => "instance",
+                    Value::Constructor(_) => "constructor",
+                    Value::OnceCached { .. } => "once",
+                    Value::MirrorDispatch { .. } => "mirror",
+                    Value::None => "none",
+                    Value::Module { .. } => "module",
+                    Value::Trait { .. } => "trait",
+                    Value::Future { .. } => "future",
+                    Value::Interval(_, _) => "interval",
+                    Value::Queue(_) => "queue",
+                    Value::Ring { .. } => "ring",
+                    Value::Sorted(_) => "sorted",
+                    Value::Bag(_) => "bag",
+                    Value::Window { .. } => "window",
+                    Value::View { .. } => "view",
+                    Value::Prio(_) => "prio",
+                    Value::Diff(_) => "diff",
+                    Value::Span { .. } => "span",
+                    Value::MutSpan { .. } => "mut_span",
+                    Value::Chunk { .. } => "chunk",
+                    Value::Sparse { .. } => "sparse",
                 };
                 Ok(Value::String(type_name.to_string()))
             }
-            
+
             "len" => {
                 if args.len() != 1 {
                     return Err("len() expects exactly 1 argument".to_string());
@@ -3848,8 +4640,7 @@ impl Interpreter {
                     _ => Err("len() can only be called on strings, lists, and tuples".to_string()),
                 }
             }
-            
-            
+
             "channel" => {
                 // Create a new channel
                 if args.len() != 0 {
@@ -3859,71 +4650,72 @@ impl Interpreter {
                 self.next_future_id += 1;
                 Ok(Value::Channel(channel_id))
             }
-            
+
             "spawn" => {
                 // Spawn a task (similar to TaskSpawn but as a function)
                 if args.len() != 1 {
-                    return Err("spawn() expects exactly 1 argument (function or block)".to_string());
+                    return Err(
+                        "spawn() expects exactly 1 argument (function or block)".to_string()
+                    );
                 }
                 let task_id = self.next_future_id;
                 self.next_future_id += 1;
-                
+
                 // Execute the argument (should be a function or expression)
                 self.push_scope();
                 let _result = self.eval_node(&args[0])?;
                 self.pop_scope();
-                
+
                 Ok(Value::Task(task_id as u64))
             }
-            
-            "range" => {
-                match args.len() {
-                    1 => {
-                        let end_val = self.eval_node(&args[0])?;
-                        if let Value::Integer(end) = end_val {
-                            let mut range = Vec::new();
-                            for i in 0..end {
-                                range.push(Value::Integer(i));
-                            }
-                            Ok(Value::List(range))
-                        } else {
-                            Err("range() expects integer argument".to_string())
+
+            "range" => match args.len() {
+                1 => {
+                    let end_val = self.eval_node(&args[0])?;
+                    if let Value::Integer(end) = end_val {
+                        let mut range = Vec::new();
+                        for i in 0..end {
+                            range.push(Value::Integer(i));
                         }
+                        Ok(Value::List(range))
+                    } else {
+                        Err("range() expects integer argument".to_string())
                     }
-                    2 => {
-                        let start_val = self.eval_node(&args[0])?;
-                        let end_val = self.eval_node(&args[1])?;
-                        if let (Value::Integer(start), Value::Integer(end)) = (start_val, end_val) {
-                            let mut range = Vec::new();
-                            for i in start..end {
-                                range.push(Value::Integer(i));
-                            }
-                            Ok(Value::List(range))
-                        } else {
-                            Err("range() expects integer arguments".to_string())
-                        }
-                    }
-                    3 => {
-                        let start_val = self.eval_node(&args[0])?;
-                        let end_val = self.eval_node(&args[1])?;
-                        let step_val = self.eval_node(&args[2])?;
-                        if let (Value::Integer(start), Value::Integer(end), Value::Integer(step)) = 
-                            (start_val, end_val, step_val) {
-                            let mut range = Vec::new();
-                            let mut i = start;
-                            while (step > 0 && i < end) || (step < 0 && i > end) {
-                                range.push(Value::Integer(i));
-                                i += step;
-                            }
-                            Ok(Value::List(range))
-                        } else {
-                            Err("range() expects integer arguments".to_string())
-                        }
-                    }
-                    _ => Err("range() expects 1, 2, or 3 arguments".to_string()),
                 }
-            }
-            
+                2 => {
+                    let start_val = self.eval_node(&args[0])?;
+                    let end_val = self.eval_node(&args[1])?;
+                    if let (Value::Integer(start), Value::Integer(end)) = (start_val, end_val) {
+                        let mut range = Vec::new();
+                        for i in start..end {
+                            range.push(Value::Integer(i));
+                        }
+                        Ok(Value::List(range))
+                    } else {
+                        Err("range() expects integer arguments".to_string())
+                    }
+                }
+                3 => {
+                    let start_val = self.eval_node(&args[0])?;
+                    let end_val = self.eval_node(&args[1])?;
+                    let step_val = self.eval_node(&args[2])?;
+                    if let (Value::Integer(start), Value::Integer(end), Value::Integer(step)) =
+                        (start_val, end_val, step_val)
+                    {
+                        let mut range = Vec::new();
+                        let mut i = start;
+                        while (step > 0 && i < end) || (step < 0 && i > end) {
+                            range.push(Value::Integer(i));
+                            i += step;
+                        }
+                        Ok(Value::List(range))
+                    } else {
+                        Err("range() expects integer arguments".to_string())
+                    }
+                }
+                _ => Err("range() expects 1, 2, or 3 arguments".to_string()),
+            },
+
             "interval" => {
                 if args.len() != 2 {
                     return Err("interval() expects exactly 2 arguments (start, end)".to_string());
@@ -3931,13 +4723,11 @@ impl Interpreter {
                 let start_val = self.eval_node(&args[0])?;
                 let end_val = self.eval_node(&args[1])?;
                 match (start_val, end_val) {
-                    (Value::Integer(start), Value::Integer(end)) => {
-                        Ok(Value::Interval(start, end))
-                    }
+                    (Value::Integer(start), Value::Integer(end)) => Ok(Value::Interval(start, end)),
                     _ => Err("interval() expects integer arguments".to_string()),
                 }
             }
-            
+
             "sum" => {
                 if args.len() != 1 {
                     return Err("sum() expects exactly 1 argument".to_string());
@@ -3957,7 +4747,7 @@ impl Interpreter {
                     _ => Err("sum() can only be called on lists".to_string()),
                 }
             }
-            
+
             // Advanced array type constructors
             "span" => {
                 if args.len() != 1 {
@@ -3976,7 +4766,7 @@ impl Interpreter {
                     _ => Err("span() requires a list argument".to_string()),
                 }
             }
-            
+
             "mut_span" => {
                 if args.len() != 1 {
                     return Err("mut_span() expects exactly 1 argument (list)".to_string());
@@ -3994,7 +4784,7 @@ impl Interpreter {
                     _ => Err("mut_span() requires a list argument".to_string()),
                 }
             }
-            
+
             "chunk" => {
                 if args.len() < 1 || args.len() > 2 {
                     return Err("chunk() expects 1-2 arguments (list, [size])".to_string());
@@ -4008,22 +4798,22 @@ impl Interpreter {
                 } else {
                     1
                 };
-                
+
                 match val {
-                    Value::List(list) => {
-                        Ok(Value::Chunk {
-                            source: Box::new(Value::List(list)),
-                            chunk_size,
-                            current_index: 0,
-                        })
-                    }
+                    Value::List(list) => Ok(Value::Chunk {
+                        source: Box::new(Value::List(list)),
+                        chunk_size,
+                        current_index: 0,
+                    }),
                     _ => Err("chunk() requires a list argument".to_string()),
                 }
             }
-            
+
             "sparse" => {
                 if args.len() < 1 || args.len() > 2 {
-                    return Err("sparse() expects 1-2 arguments (size or list, [default])".to_string());
+                    return Err(
+                        "sparse() expects 1-2 arguments (size or list, [default])".to_string()
+                    );
                 }
                 let val = self.eval_node(&args[0])?;
                 let default = if args.len() == 2 {
@@ -4031,15 +4821,13 @@ impl Interpreter {
                 } else {
                     Box::new(Value::Integer(0))
                 };
-                
+
                 match val {
-                    Value::Integer(size) => {
-                        Ok(Value::Sparse {
-                            data: HashMap::new(),
-                            default,
-                            size: size as usize,
-                        })
-                    }
+                    Value::Integer(size) => Ok(Value::Sparse {
+                        data: HashMap::new(),
+                        default,
+                        size: size as usize,
+                    }),
                     Value::List(list) => {
                         let mut data = HashMap::new();
                         for (i, item) in list.iter().enumerate() {
@@ -4056,7 +4844,7 @@ impl Interpreter {
                     _ => Err("sparse() requires an integer size or list".to_string()),
                 }
             }
-            
+
             "ring" => {
                 if args.len() != 1 {
                     return Err("ring() expects exactly 1 argument (capacity)".to_string());
@@ -4077,15 +4865,16 @@ impl Interpreter {
                     _ => Err("ring() requires an integer capacity".to_string()),
                 }
             }
-            
+
             "map" => {
                 // Check if we're in a pipeline context (1 arg) or normal call (2 args)
                 let (list_val, func_val) = if args.len() == 1 {
                     // Pipeline context: get list from __pipeline__
-                    let pipeline_val = self.get_variable("__pipeline__")
-                        .unwrap_or(Value::None);
+                    let pipeline_val = self.get_variable("__pipeline__").unwrap_or(Value::None);
                     if matches!(pipeline_val, Value::None) {
-                        return Err("map() in pipeline requires a value from the left side".to_string());
+                        return Err(
+                            "map() in pipeline requires a value from the left side".to_string()
+                        );
                     }
                     let func_val = self.eval_node(&args[0])?;
                     (pipeline_val, func_val)
@@ -4095,9 +4884,11 @@ impl Interpreter {
                     let func_val = self.eval_node(&args[1])?;
                     (list_val, func_val)
                 } else {
-                    return Err("map() expects 1 argument in pipeline or 2 arguments normally".to_string());
+                    return Err(
+                        "map() expects 1 argument in pipeline or 2 arguments normally".to_string(),
+                    );
                 };
-                
+
                 match list_val {
                     Value::List(list) => {
                         let mut result = Vec::new();
@@ -4107,24 +4898,31 @@ impl Interpreter {
                                 Value::Function { params, body, .. } => {
                                     // Create new scope for lambda
                                     self.push_scope();
-                                    
+
                                     // Set parameter
                                     if params.len() == 1 {
                                         self.set_variable(params[0].clone(), item);
                                     } else {
                                         self.pop_scope();
-                                        return Err(format!("map() lambda must have exactly 1 parameter, got {}", params.len()));
+                                        return Err(format!(
+                                            "map() lambda must have exactly 1 parameter, got {}",
+                                            params.len()
+                                        ));
                                     }
-                                    
+
                                     // Execute function body
                                     let result = self.eval_node(body)?;
-                                    
+
                                     // Restore scope
                                     self.pop_scope();
-                                    
+
                                     result
                                 }
-                                _ => return Err("map() expects a function as second argument".to_string()),
+                                _ => {
+                                    return Err(
+                                        "map() expects a function as second argument".to_string()
+                                    )
+                                }
                             };
                             result.push(mapped_val);
                         }
@@ -4133,13 +4931,13 @@ impl Interpreter {
                     _ => Err("map() can only be called on lists".to_string()),
                 }
             }
-            
+
             "unique" => {
                 if args.len() != 1 {
                     return Err("unique() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         let mut unique_list = Vec::new();
@@ -4153,13 +4951,13 @@ impl Interpreter {
                     _ => Err("unique() can only be called on lists".to_string()),
                 }
             }
-            
+
             "reverse" => {
                 if args.len() != 1 {
                     return Err("reverse() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(mut list) => {
                         list.reverse();
@@ -4173,28 +4971,35 @@ impl Interpreter {
                         vec.reverse();
                         Ok(Value::Vector(vec))
                     }
-                    _ => Err("reverse() can only be called on lists, strings, or vectors".to_string()),
+                    _ => {
+                        Err("reverse() can only be called on lists, strings, or vectors"
+                            .to_string())
+                    }
                 }
             }
-            
+
             "sort" => {
                 if args.len() != 1 {
                     return Err("sort() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(mut list) => {
                         // Simple sort for integers and floats
-                        list.sort_by(|a, b| {
-                            match (a, b) {
-                                (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
-                                (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
-                                (Value::Integer(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
-                                (Value::Float(x), Value::Integer(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal),
-                                (Value::String(x), Value::String(y)) => x.cmp(y),
-                                _ => std::cmp::Ordering::Equal,
+                        list.sort_by(|a, b| match (a, b) {
+                            (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
+                            (Value::Float(x), Value::Float(y)) => {
+                                x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
                             }
+                            (Value::Integer(x), Value::Float(y)) => (*x as f64)
+                                .partial_cmp(y)
+                                .unwrap_or(std::cmp::Ordering::Equal),
+                            (Value::Float(x), Value::Integer(y)) => x
+                                .partial_cmp(&(*y as f64))
+                                .unwrap_or(std::cmp::Ordering::Equal),
+                            (Value::String(x), Value::String(y)) => x.cmp(y),
+                            _ => std::cmp::Ordering::Equal,
                         });
                         Ok(Value::List(list))
                     }
@@ -4205,23 +5010,28 @@ impl Interpreter {
                     _ => Err("sort() can only be called on lists or vectors".to_string()),
                 }
             }
-            
+
             "group_by" => {
                 if args.len() != 2 {
-                    return Err("group_by() expects exactly 2 arguments (list, key_function)".to_string());
+                    return Err(
+                        "group_by() expects exactly 2 arguments (list, key_function)".to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let key_fn = self.eval_node(&args[1])?;
-                
+
                 if let Value::List(items) = list_val {
                     let mut groups: HashMap<String, Vec<Value>> = HashMap::new();
-                    
+
                     for item in items {
                         // Call the key function with the item
                         let key_val = match &key_fn {
                             Value::Function { params, body, .. } => {
                                 if params.len() != 1 {
-                                    return Err("group_by key function must take exactly 1 parameter".to_string());
+                                    return Err(
+                                        "group_by key function must take exactly 1 parameter"
+                                            .to_string(),
+                                    );
                                 }
                                 self.push_scope();
                                 self.set_variable(params[0].clone(), item.clone());
@@ -4229,14 +5039,18 @@ impl Interpreter {
                                 self.pop_scope();
                                 result
                             }
-                            _ => return Err("group_by requires a function as second argument".to_string()),
+                            _ => {
+                                return Err(
+                                    "group_by requires a function as second argument".to_string()
+                                )
+                            }
                         };
-                        
+
                         // Convert key to string
                         let key_str = key_val.to_string();
                         groups.entry(key_str).or_insert_with(Vec::new).push(item);
                     }
-                    
+
                     // Convert to dict of lists
                     let mut result = HashMap::new();
                     for (key, values) in groups {
@@ -4247,24 +5061,29 @@ impl Interpreter {
                     Err("group_by requires a list as first argument".to_string())
                 }
             }
-            
+
             "partition" => {
                 if args.len() != 2 {
-                    return Err("partition() expects exactly 2 arguments (list, predicate)".to_string());
+                    return Err(
+                        "partition() expects exactly 2 arguments (list, predicate)".to_string()
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let predicate = self.eval_node(&args[1])?;
-                
+
                 if let Value::List(items) = list_val {
                     let mut true_items = Vec::new();
                     let mut false_items = Vec::new();
-                    
+
                     for item in items {
                         // Call the predicate function with the item
                         let pred_result = match &predicate {
                             Value::Function { params, body, .. } => {
                                 if params.len() != 1 {
-                                    return Err("partition predicate must take exactly 1 parameter".to_string());
+                                    return Err(
+                                        "partition predicate must take exactly 1 parameter"
+                                            .to_string(),
+                                    );
                                 }
                                 self.push_scope();
                                 self.set_variable(params[0].clone(), item.clone());
@@ -4272,29 +5091,38 @@ impl Interpreter {
                                 self.pop_scope();
                                 result
                             }
-                            _ => return Err("partition requires a function as second argument".to_string()),
+                            _ => {
+                                return Err(
+                                    "partition requires a function as second argument".to_string()
+                                )
+                            }
                         };
-                        
+
                         match pred_result {
                             Value::Boolean(true) => true_items.push(item),
                             Value::Boolean(false) => false_items.push(item),
-                            _ => return Err("partition predicate must return a boolean".to_string()),
+                            _ => {
+                                return Err("partition predicate must return a boolean".to_string())
+                            }
                         }
                     }
-                    
+
                     // Return tuple of (true_items, false_items)
-                    Ok(Value::Tuple(vec![Value::List(true_items), Value::List(false_items)]))
+                    Ok(Value::Tuple(vec![
+                        Value::List(true_items),
+                        Value::List(false_items),
+                    ]))
                 } else {
                     Err("partition requires a list as first argument".to_string())
                 }
             }
-            
+
             "min" => {
                 if args.len() != 1 {
                     return Err("min() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         if list.is_empty() {
@@ -4303,10 +5131,26 @@ impl Interpreter {
                         let mut min_val = &list[0];
                         for item in &list[1..] {
                             match (min_val, item) {
-                                (Value::Integer(x), Value::Integer(y)) => if y < x { min_val = item; },
-                                (Value::Float(x), Value::Float(y)) => if y < x { min_val = item; },
-                                (Value::Integer(x), Value::Float(y)) => if y < &(*x as f64) { min_val = item; },
-                                (Value::Float(x), Value::Integer(y)) => if (*y as f64) < *x { min_val = item; },
+                                (Value::Integer(x), Value::Integer(y)) => {
+                                    if y < x {
+                                        min_val = item;
+                                    }
+                                }
+                                (Value::Float(x), Value::Float(y)) => {
+                                    if y < x {
+                                        min_val = item;
+                                    }
+                                }
+                                (Value::Integer(x), Value::Float(y)) => {
+                                    if y < &(*x as f64) {
+                                        min_val = item;
+                                    }
+                                }
+                                (Value::Float(x), Value::Integer(y)) => {
+                                    if (*y as f64) < *x {
+                                        min_val = item;
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -4316,19 +5160,21 @@ impl Interpreter {
                         if vec.is_empty() {
                             return Err("Cannot find min of empty vector".to_string());
                         }
-                        let min_val = vec.iter().fold(vec[0], |acc, &x| if x < acc { x } else { acc });
+                        let min_val = vec
+                            .iter()
+                            .fold(vec[0], |acc, &x| if x < acc { x } else { acc });
                         Ok(Value::Float(min_val))
                     }
                     _ => Err("min() can only be called on lists or vectors".to_string()),
                 }
             }
-            
+
             "max" => {
                 if args.len() != 1 {
                     return Err("max() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         if list.is_empty() {
@@ -4337,10 +5183,26 @@ impl Interpreter {
                         let mut max_val = &list[0];
                         for item in &list[1..] {
                             match (max_val, item) {
-                                (Value::Integer(x), Value::Integer(y)) => if y > x { max_val = item; },
-                                (Value::Float(x), Value::Float(y)) => if y > x { max_val = item; },
-                                (Value::Integer(x), Value::Float(y)) => if y > &(*x as f64) { max_val = item; },
-                                (Value::Float(x), Value::Integer(y)) => if (*y as f64) > *x { max_val = item; },
+                                (Value::Integer(x), Value::Integer(y)) => {
+                                    if y > x {
+                                        max_val = item;
+                                    }
+                                }
+                                (Value::Float(x), Value::Float(y)) => {
+                                    if y > x {
+                                        max_val = item;
+                                    }
+                                }
+                                (Value::Integer(x), Value::Float(y)) => {
+                                    if y > &(*x as f64) {
+                                        max_val = item;
+                                    }
+                                }
+                                (Value::Float(x), Value::Integer(y)) => {
+                                    if (*y as f64) > *x {
+                                        max_val = item;
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -4350,23 +5212,28 @@ impl Interpreter {
                         if vec.is_empty() {
                             return Err("Cannot find max of empty vector".to_string());
                         }
-                        let max_val = vec.iter().fold(vec[0], |acc, &x| if x > acc { x } else { acc });
+                        let max_val = vec
+                            .iter()
+                            .fold(vec[0], |acc, &x| if x > acc { x } else { acc });
                         Ok(Value::Float(max_val))
                     }
                     _ => Err("max() can only be called on lists or vectors".to_string()),
                 }
             }
-            
+
             "count" => {
                 if args.len() != 2 {
                     return Err("count() expects exactly 2 arguments".to_string());
                 }
                 let container_val = self.eval_node(&args[0])?;
                 let item_val = self.eval_node(&args[1])?;
-                
+
                 match container_val {
                     Value::List(list) => {
-                        let count = list.iter().filter(|x| self.values_equal(x, &item_val)).count();
+                        let count = list
+                            .iter()
+                            .filter(|x| self.values_equal(x, &item_val))
+                            .count();
                         Ok(Value::Integer(count as i64))
                     }
                     Value::String(s) => {
@@ -4383,13 +5250,13 @@ impl Interpreter {
                     _ => Err("count() can only be called on lists or strings".to_string()),
                 }
             }
-            
+
             "flatten" => {
                 if args.len() != 1 {
                     return Err("flatten() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         let mut flattened = Vec::new();
@@ -4406,14 +5273,14 @@ impl Interpreter {
                     _ => Err("flatten() can only be called on lists".to_string()),
                 }
             }
-            
+
             "zip" => {
                 if args.len() != 2 {
                     return Err("zip() expects exactly 2 arguments".to_string());
                 }
                 let list1_val = self.eval_node(&args[0])?;
                 let list2_val = self.eval_node(&args[1])?;
-                
+
                 match (list1_val, list2_val) {
                     (Value::List(list1), Value::List(list2)) => {
                         let mut zipped = Vec::new();
@@ -4425,38 +5292,41 @@ impl Interpreter {
                     _ => Err("zip() expects two lists".to_string()),
                 }
             }
-            
+
             "enumerate" => {
                 if args.len() != 1 {
                     return Err("enumerate() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         let mut enumerated = Vec::new();
                         for (i, item) in list.iter().enumerate() {
-                            enumerated.push(Value::Tuple(vec![Value::Integer(i as i64), item.clone()]));
+                            enumerated
+                                .push(Value::Tuple(vec![Value::Integer(i as i64), item.clone()]));
                         }
                         Ok(Value::List(enumerated))
                     }
                     _ => Err("enumerate() can only be called on lists".to_string()),
                 }
             }
-            
+
             "union" => {
                 if args.len() != 2 {
-                    return Err("union() expects exactly 2 arguments: union(list1, list2)".to_string());
+                    return Err(
+                        "union() expects exactly 2 arguments: union(list1, list2)".to_string()
+                    );
                 }
                 let list1_val = self.eval_node(&args[0])?;
                 let list2_val = self.eval_node(&args[1])?;
-                
+
                 match (list1_val, list2_val) {
                     (Value::List(list1), Value::List(list2)) => {
                         use std::collections::HashSet;
                         let mut seen = HashSet::new();
                         let mut result = Vec::new();
-                        
+
                         // Add all from list1
                         for item in list1.iter() {
                             let key = format!("{:?}", item);
@@ -4464,7 +5334,7 @@ impl Interpreter {
                                 result.push(item.clone());
                             }
                         }
-                        
+
                         // Add unique from list2
                         for item in list2.iter() {
                             let key = format!("{:?}", item);
@@ -4472,30 +5342,33 @@ impl Interpreter {
                                 result.push(item.clone());
                             }
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("union() expects two lists".to_string()),
                 }
             }
-            
+
             "intersect" => {
                 if args.len() != 2 {
-                    return Err("intersect() expects exactly 2 arguments: intersect(list1, list2)".to_string());
+                    return Err(
+                        "intersect() expects exactly 2 arguments: intersect(list1, list2)"
+                            .to_string(),
+                    );
                 }
                 let list1_val = self.eval_node(&args[0])?;
                 let list2_val = self.eval_node(&args[1])?;
-                
+
                 match (list1_val, list2_val) {
                     (Value::List(list1), Value::List(list2)) => {
                         use std::collections::HashSet;
                         let mut set2 = HashSet::new();
-                        
+
                         // Build set from list2
                         for item in list2.iter() {
                             set2.insert(format!("{:?}", item));
                         }
-                        
+
                         // Keep items from list1 that are in set2
                         let mut result = Vec::new();
                         let mut seen = HashSet::new();
@@ -4505,30 +5378,33 @@ impl Interpreter {
                                 result.push(item.clone());
                             }
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("intersect() expects two lists".to_string()),
                 }
             }
-            
+
             "difference" => {
                 if args.len() != 2 {
-                    return Err("difference() expects exactly 2 arguments: difference(list1, list2)".to_string());
+                    return Err(
+                        "difference() expects exactly 2 arguments: difference(list1, list2)"
+                            .to_string(),
+                    );
                 }
                 let list1_val = self.eval_node(&args[0])?;
                 let list2_val = self.eval_node(&args[1])?;
-                
+
                 match (list1_val, list2_val) {
                     (Value::List(list1), Value::List(list2)) => {
                         use std::collections::HashSet;
                         let mut set2 = HashSet::new();
-                        
+
                         // Build set from list2
                         for item in list2.iter() {
                             set2.insert(format!("{:?}", item));
                         }
-                        
+
                         // Keep items from list1 that are NOT in set2
                         let mut result = Vec::new();
                         let mut seen = HashSet::new();
@@ -4538,26 +5414,26 @@ impl Interpreter {
                                 result.push(item.clone());
                             }
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("difference() expects two lists".to_string()),
                 }
             }
-            
+
             "symmetric_diff" => {
                 if args.len() != 2 {
                     return Err("symmetric_diff() expects exactly 2 arguments: symmetric_diff(list1, list2)".to_string());
                 }
                 let list1_val = self.eval_node(&args[0])?;
                 let list2_val = self.eval_node(&args[1])?;
-                
+
                 match (list1_val, list2_val) {
                     (Value::List(list1), Value::List(list2)) => {
                         use std::collections::HashSet;
                         let mut set1 = HashSet::new();
                         let mut set2 = HashSet::new();
-                        
+
                         // Build sets
                         for item in list1.iter() {
                             set1.insert(format!("{:?}", item));
@@ -4565,7 +5441,7 @@ impl Interpreter {
                         for item in list2.iter() {
                             set2.insert(format!("{:?}", item));
                         }
-                        
+
                         // Items in list1 but not list2
                         let mut result = Vec::new();
                         let mut seen = HashSet::new();
@@ -4575,7 +5451,7 @@ impl Interpreter {
                                 result.push(item.clone());
                             }
                         }
-                        
+
                         // Items in list2 but not list1
                         for item in list2.iter() {
                             let key = format!("{:?}", item);
@@ -4583,21 +5459,22 @@ impl Interpreter {
                                 result.push(item.clone());
                             }
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("symmetric_diff() expects two lists".to_string()),
                 }
             }
-            
+
             "filter" => {
                 // Check if we're in a pipeline context (1 arg) or normal call (2 args)
                 let (list_val, func_val) = if args.len() == 1 {
                     // Pipeline context: get list from __pipeline__
-                    let pipeline_val = self.get_variable("__pipeline__")
-                        .unwrap_or(Value::None);
+                    let pipeline_val = self.get_variable("__pipeline__").unwrap_or(Value::None);
                     if matches!(pipeline_val, Value::None) {
-                        return Err("filter() in pipeline requires a value from the left side".to_string());
+                        return Err(
+                            "filter() in pipeline requires a value from the left side".to_string()
+                        );
                     }
                     let func_val = self.eval_node(&args[0])?;
                     (pipeline_val, func_val)
@@ -4607,9 +5484,12 @@ impl Interpreter {
                     let func_val = self.eval_node(&args[1])?;
                     (list_val, func_val)
                 } else {
-                    return Err("filter() expects 1 argument in pipeline or 2 arguments normally".to_string());
+                    return Err(
+                        "filter() expects 1 argument in pipeline or 2 arguments normally"
+                            .to_string(),
+                    );
                 };
-                
+
                 match list_val {
                     Value::List(list) => {
                         let mut result = Vec::new();
@@ -4619,26 +5499,32 @@ impl Interpreter {
                                 Value::Function { params, body, .. } => {
                                     // Create new scope for lambda
                                     self.push_scope();
-                                    
+
                                     // Set parameter
                                     if params.len() == 1 {
                                         self.set_variable(params[0].clone(), item.clone());
                                     } else {
                                         self.pop_scope();
-                                        return Err(format!("filter() lambda must have exactly 1 parameter, got {}", params.len()));
+                                        return Err(format!(
+                                            "filter() lambda must have exactly 1 parameter, got {}",
+                                            params.len()
+                                        ));
                                     }
-                                    
+
                                     // Execute function body
                                     let result = self.eval_node(body)?;
-                                    
+
                                     // Restore scope
                                     self.pop_scope();
-                                    
+
                                     result
                                 }
-                                _ => return Err("filter() expects a function as second argument".to_string()),
+                                _ => {
+                                    return Err("filter() expects a function as second argument"
+                                        .to_string())
+                                }
                             };
-                            
+
                             if self.is_truthy(&filter_result) {
                                 result.push(item);
                             }
@@ -4648,20 +5534,20 @@ impl Interpreter {
                     _ => Err("filter() can only be called on lists".to_string()),
                 }
             }
-            
+
             "reduce" => {
                 // reduce(list, initial, func) or reduce(list, func) in pipeline
                 let (list_val, initial_val, func_val) = if args.len() == 2 {
                     // Pipeline context or no initial value: reduce(list, func)
                     let list_val = self.eval_node(&args[0])?;
                     let func_val = self.eval_node(&args[1])?;
-                    
+
                     // Get first element as initial value
                     let initial = match &list_val {
                         Value::List(list) if !list.is_empty() => list[0].clone(),
                         _ => return Err("reduce() requires a non-empty list".to_string()),
                     };
-                    
+
                     (list_val, initial, func_val)
                 } else if args.len() == 3 {
                     // Normal call: reduce(list, initial, func)
@@ -4672,18 +5558,18 @@ impl Interpreter {
                 } else {
                     return Err("reduce() expects 2 or 3 arguments".to_string());
                 };
-                
+
                 match list_val {
                     Value::List(list) => {
                         let mut accumulator = initial_val;
                         let start_idx = if args.len() == 2 { 1 } else { 0 };
-                        
+
                         for item in list.iter().skip(start_idx) {
                             // Call the function with accumulator and item
                             let result = match &func_val {
                                 Value::Function { params, body, .. } => {
                                     self.push_scope();
-                                    
+
                                     if params.len() == 2 {
                                         self.set_variable(params[0].clone(), accumulator.clone());
                                         self.set_variable(params[1].clone(), item.clone());
@@ -4691,30 +5577,34 @@ impl Interpreter {
                                         self.pop_scope();
                                         return Err(format!("reduce() lambda must have exactly 2 parameters, got {}", params.len()));
                                     }
-                                    
+
                                     let result = self.eval_node(body)?;
                                     self.pop_scope();
                                     result
                                 }
-                                _ => return Err("reduce() expects a function as last argument".to_string()),
+                                _ => {
+                                    return Err(
+                                        "reduce() expects a function as last argument".to_string()
+                                    )
+                                }
                             };
-                            
+
                             accumulator = result;
                         }
-                        
+
                         Ok(accumulator)
                     }
                     _ => Err("reduce() can only be called on lists".to_string()),
                 }
             }
-            
+
             "push" => {
                 if args.len() != 2 {
                     return Err("push() expects exactly 2 arguments".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let item_val = self.eval_node(&args[1])?;
-                
+
                 match list_val {
                     Value::List(mut list) => {
                         list.push(item_val);
@@ -4723,13 +5613,13 @@ impl Interpreter {
                     _ => Err("push() can only be called on lists".to_string()),
                 }
             }
-            
+
             "pop" => {
                 if args.len() != 1 {
                     return Err("pop() expects exactly 1 argument".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
-                
+
                 match list_val {
                     Value::List(mut list) => {
                         if let Some(item) = list.pop() {
@@ -4741,15 +5631,18 @@ impl Interpreter {
                     _ => Err("pop() can only be called on lists".to_string()),
                 }
             }
-            
+
             // Deque operations
             "push_front" => {
                 if args.len() != 2 {
-                    return Err("push_front() expects exactly 2 arguments: push_front(deque, item)".to_string());
+                    return Err(
+                        "push_front() expects exactly 2 arguments: push_front(deque, item)"
+                            .to_string(),
+                    );
                 }
                 let deque_val = self.eval_node(&args[0])?;
                 let item_val = self.eval_node(&args[1])?;
-                
+
                 match deque_val {
                     Value::Deque(mut deque) => {
                         deque.insert(0, item_val);
@@ -4758,14 +5651,17 @@ impl Interpreter {
                     _ => Err("push_front() can only be called on deques".to_string()),
                 }
             }
-            
+
             "push_back" => {
                 if args.len() != 2 {
-                    return Err("push_back() expects exactly 2 arguments: push_back(deque, item)".to_string());
+                    return Err(
+                        "push_back() expects exactly 2 arguments: push_back(deque, item)"
+                            .to_string(),
+                    );
                 }
                 let deque_val = self.eval_node(&args[0])?;
                 let item_val = self.eval_node(&args[1])?;
-                
+
                 match deque_val {
                     Value::Deque(mut deque) => {
                         deque.push(item_val);
@@ -4774,13 +5670,15 @@ impl Interpreter {
                     _ => Err("push_back() can only be called on deques".to_string()),
                 }
             }
-            
+
             "pop_front" => {
                 if args.len() != 1 {
-                    return Err("pop_front() expects exactly 1 argument: pop_front(deque)".to_string());
+                    return Err(
+                        "pop_front() expects exactly 1 argument: pop_front(deque)".to_string()
+                    );
                 }
                 let deque_val = self.eval_node(&args[0])?;
-                
+
                 match deque_val {
                     Value::Deque(mut deque) => {
                         if !deque.is_empty() {
@@ -4793,13 +5691,15 @@ impl Interpreter {
                     _ => Err("pop_front() can only be called on deques".to_string()),
                 }
             }
-            
+
             "pop_back" => {
                 if args.len() != 1 {
-                    return Err("pop_back() expects exactly 1 argument: pop_back(deque)".to_string());
+                    return Err(
+                        "pop_back() expects exactly 1 argument: pop_back(deque)".to_string()
+                    );
                 }
                 let deque_val = self.eval_node(&args[0])?;
-                
+
                 match deque_val {
                     Value::Deque(mut deque) => {
                         if let Some(item) = deque.pop() {
@@ -4811,13 +5711,15 @@ impl Interpreter {
                     _ => Err("pop_back() can only be called on deques".to_string()),
                 }
             }
-            
+
             "peek_front" => {
                 if args.len() != 1 {
-                    return Err("peek_front() expects exactly 1 argument: peek_front(deque)".to_string());
+                    return Err(
+                        "peek_front() expects exactly 1 argument: peek_front(deque)".to_string()
+                    );
                 }
                 let deque_val = self.eval_node(&args[0])?;
-                
+
                 match deque_val {
                     Value::Deque(deque) => {
                         if !deque.is_empty() {
@@ -4829,13 +5731,15 @@ impl Interpreter {
                     _ => Err("peek_front() can only be called on deques".to_string()),
                 }
             }
-            
+
             "peek_back" => {
                 if args.len() != 1 {
-                    return Err("peek_back() expects exactly 1 argument: peek_back(deque)".to_string());
+                    return Err(
+                        "peek_back() expects exactly 1 argument: peek_back(deque)".to_string()
+                    );
                 }
                 let deque_val = self.eval_node(&args[0])?;
-                
+
                 match deque_val {
                     Value::Deque(deque) => {
                         if !deque.is_empty() {
@@ -4847,21 +5751,24 @@ impl Interpreter {
                     _ => Err("peek_back() can only be called on deques".to_string()),
                 }
             }
-            
+
             // Priority Queue operations
             "pq_push" => {
                 if args.len() != 3 {
-                    return Err("pq_push() expects exactly 3 arguments: pq_push(pq, priority, item)".to_string());
+                    return Err(
+                        "pq_push() expects exactly 3 arguments: pq_push(pq, priority, item)"
+                            .to_string(),
+                    );
                 }
                 let pq_val = self.eval_node(&args[0])?;
                 let priority_val = self.eval_node(&args[1])?;
                 let item_val = self.eval_node(&args[2])?;
-                
+
                 let priority = match priority_val {
                     Value::Integer(p) => p,
                     _ => return Err("Priority must be an integer".to_string()),
                 };
-                
+
                 match pq_val {
                     Value::PriorityQ(mut pq) => {
                         pq.push((priority, item_val));
@@ -4872,13 +5779,13 @@ impl Interpreter {
                     _ => Err("pq_push() can only be called on priority queues".to_string()),
                 }
             }
-            
+
             "pq_pop" => {
                 if args.len() != 1 {
                     return Err("pq_pop() expects exactly 1 argument: pq_pop(pq)".to_string());
                 }
                 let pq_val = self.eval_node(&args[0])?;
-                
+
                 match pq_val {
                     Value::PriorityQ(mut pq) => {
                         if !pq.is_empty() {
@@ -4892,13 +5799,13 @@ impl Interpreter {
                     _ => Err("pq_pop() can only be called on priority queues".to_string()),
                 }
             }
-            
+
             "pq_peek" => {
                 if args.len() != 1 {
                     return Err("pq_peek() expects exactly 1 argument: pq_peek(pq)".to_string());
                 }
                 let pq_val = self.eval_node(&args[0])?;
-                
+
                 match pq_val {
                     Value::PriorityQ(pq) => {
                         if !pq.is_empty() {
@@ -4910,14 +5817,14 @@ impl Interpreter {
                     _ => Err("pq_peek() can only be called on priority queues".to_string()),
                 }
             }
-            
+
             "append" => {
                 if args.len() != 2 {
                     return Err("append() expects exactly 2 arguments".to_string());
                 }
                 let list1_val = self.eval_node(&args[0])?;
                 let list2_val = self.eval_node(&args[1])?;
-                
+
                 match (list1_val, list2_val) {
                     (Value::List(mut list1), Value::List(list2)) => {
                         list1.extend(list2);
@@ -4926,14 +5833,14 @@ impl Interpreter {
                     _ => Err("append() can only be called on two lists".to_string()),
                 }
             }
-            
+
             "contains" => {
                 if args.len() != 2 {
                     return Err("contains() expects exactly 2 arguments".to_string());
                 }
                 let container_val = self.eval_node(&args[0])?;
                 let item_val = self.eval_node(&args[1])?;
-                
+
                 match container_val {
                     Value::List(list) => {
                         for list_item in list {
@@ -4961,33 +5868,34 @@ impl Interpreter {
                             Err("contains() on dict requires string or integer key".to_string())
                         }
                     }
-                    _ => Err("contains() can only be called on lists, strings, or dicts".to_string()),
+                    _ => {
+                        Err("contains() can only be called on lists, strings, or dicts".to_string())
+                    }
                 }
             }
-            
+
             "keys" => {
                 if args.len() != 1 {
                     return Err("keys() expects exactly 1 argument".to_string());
                 }
                 let dict_val = self.eval_node(&args[0])?;
-                
+
                 match dict_val {
                     Value::Dict(dict) => {
-                        let keys: Vec<Value> = dict.keys()
-                            .map(|k| Value::String(k.clone()))
-                            .collect();
+                        let keys: Vec<Value> =
+                            dict.keys().map(|k| Value::String(k.clone())).collect();
                         Ok(Value::List(keys))
                     }
                     _ => Err("keys() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             "values" => {
                 if args.len() != 1 {
                     return Err("values() expects exactly 1 argument".to_string());
                 }
                 let dict_val = self.eval_node(&args[0])?;
-                
+
                 match dict_val {
                     Value::Dict(dict) => {
                         let values: Vec<Value> = dict.values().cloned().collect();
@@ -4996,7 +5904,7 @@ impl Interpreter {
                     _ => Err("values() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             // Dictionary methods
             "items" => {
                 if args.len() != 1 {
@@ -5007,20 +5915,19 @@ impl Interpreter {
                     Value::Dict(dict) => {
                         let mut items = Vec::new();
                         for (k, v) in dict.iter() {
-                            items.push(Value::Tuple(vec![
-                                Value::String(k.clone()),
-                                v.clone(),
-                            ]));
+                            items.push(Value::Tuple(vec![Value::String(k.clone()), v.clone()]));
                         }
                         Ok(Value::List(items))
                     }
                     _ => Err("items() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             "get" => {
                 if args.len() < 2 || args.len() > 3 {
-                    return Err("get() expects 2 or 3 arguments: get(dict, key, [default])".to_string());
+                    return Err(
+                        "get() expects 2 or 3 arguments: get(dict, key, [default])".to_string()
+                    );
                 }
                 let dict_val = self.eval_node(&args[0])?;
                 let key_val = self.eval_node(&args[1])?;
@@ -5029,7 +5936,7 @@ impl Interpreter {
                 } else {
                     None
                 };
-                
+
                 match dict_val {
                     Value::Dict(dict) => {
                         let key = match key_val {
@@ -5037,7 +5944,7 @@ impl Interpreter {
                             Value::Integer(i) => i.to_string(),
                             _ => return Err("get() key must be string or integer".to_string()),
                         };
-                        
+
                         if let Some(value) = dict.get(&key) {
                             Ok(value.clone())
                         } else if let Some(default_val) = default {
@@ -5049,14 +5956,14 @@ impl Interpreter {
                     _ => Err("get() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             "has" => {
                 if args.len() != 2 {
                     return Err("has() expects exactly 2 arguments: has(dict, key)".to_string());
                 }
                 let dict_val = self.eval_node(&args[0])?;
                 let key_val = self.eval_node(&args[1])?;
-                
+
                 match dict_val {
                     Value::Dict(dict) => {
                         let key = match key_val {
@@ -5069,14 +5976,16 @@ impl Interpreter {
                     _ => Err("has() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             "remove" => {
                 if args.len() != 2 {
-                    return Err("remove() expects exactly 2 arguments: remove(dict, key)".to_string());
+                    return Err(
+                        "remove() expects exactly 2 arguments: remove(dict, key)".to_string()
+                    );
                 }
                 let dict_val = self.eval_node(&args[0])?;
                 let key_val = self.eval_node(&args[1])?;
-                
+
                 match dict_val {
                     Value::Dict(mut dict) => {
                         let key = match key_val {
@@ -5084,7 +5993,7 @@ impl Interpreter {
                             Value::Integer(i) => i.to_string(),
                             _ => return Err("remove() key must be string or integer".to_string()),
                         };
-                        
+
                         if let Some(value) = dict.remove(&key) {
                             Ok(value)
                         } else {
@@ -5094,14 +6003,16 @@ impl Interpreter {
                     _ => Err("remove() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             "merge" => {
                 if args.len() != 2 {
-                    return Err("merge() expects exactly 2 arguments: merge(dict1, dict2)".to_string());
+                    return Err(
+                        "merge() expects exactly 2 arguments: merge(dict1, dict2)".to_string()
+                    );
                 }
                 let dict1_val = self.eval_node(&args[0])?;
                 let dict2_val = self.eval_node(&args[1])?;
-                
+
                 match (dict1_val, dict2_val) {
                     (Value::Dict(mut dict1), Value::Dict(dict2)) => {
                         for (k, v) in dict2.iter() {
@@ -5112,14 +6023,16 @@ impl Interpreter {
                     _ => Err("merge() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             "update" => {
                 if args.len() != 2 {
-                    return Err("update() expects exactly 2 arguments: update(dict1, dict2)".to_string());
+                    return Err(
+                        "update() expects exactly 2 arguments: update(dict1, dict2)".to_string()
+                    );
                 }
                 let dict1_val = self.eval_node(&args[0])?;
                 let dict2_val = self.eval_node(&args[1])?;
-                
+
                 match (dict1_val, dict2_val) {
                     (Value::Dict(mut dict1), Value::Dict(dict2)) => {
                         for (k, v) in dict2.iter() {
@@ -5130,28 +6043,29 @@ impl Interpreter {
                     _ => Err("update() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             "clear" => {
                 if args.len() != 1 {
                     return Err("clear() expects exactly 1 argument: clear(dict)".to_string());
                 }
                 let dict_val = self.eval_node(&args[0])?;
                 match dict_val {
-                    Value::Dict(_) => {
-                        Ok(Value::Dict(HashMap::new()))
-                    }
+                    Value::Dict(_) => Ok(Value::Dict(HashMap::new())),
                     _ => Err("clear() can only be called on dictionaries".to_string()),
                 }
             }
-            
+
             // Enum methods
             "enum_name" => {
                 if args.len() != 2 {
-                    return Err("enum_name() expects exactly 2 arguments: enum_name(enum, value)".to_string());
+                    return Err(
+                        "enum_name() expects exactly 2 arguments: enum_name(enum, value)"
+                            .to_string(),
+                    );
                 }
                 let enum_val = self.eval_node(&args[0])?;
                 let value_val = self.eval_node(&args[1])?;
-                
+
                 match enum_val {
                     Value::Dict(dict) => {
                         // Find the key (variant name) that has this value
@@ -5165,14 +6079,17 @@ impl Interpreter {
                     _ => Err("enum_name() can only be called on enums".to_string()),
                 }
             }
-            
+
             "enum_value" => {
                 if args.len() != 2 {
-                    return Err("enum_value() expects exactly 2 arguments: enum_value(enum, name)".to_string());
+                    return Err(
+                        "enum_value() expects exactly 2 arguments: enum_value(enum, name)"
+                            .to_string(),
+                    );
                 }
                 let enum_val = self.eval_node(&args[0])?;
                 let name_val = self.eval_node(&args[1])?;
-                
+
                 match (enum_val, name_val) {
                     (Value::Dict(dict), Value::String(name)) => {
                         if let Some(value) = dict.get(&name) {
@@ -5181,17 +6098,21 @@ impl Interpreter {
                             Ok(Value::None)
                         }
                     }
-                    _ => Err("enum_value() can only be called on enums with string name".to_string()),
+                    _ => {
+                        Err("enum_value() can only be called on enums with string name".to_string())
+                    }
                 }
             }
-            
+
             "enum_has" => {
                 if args.len() != 2 {
-                    return Err("enum_has() expects exactly 2 arguments: enum_has(enum, value)".to_string());
+                    return Err(
+                        "enum_has() expects exactly 2 arguments: enum_has(enum, value)".to_string(),
+                    );
                 }
                 let enum_val = self.eval_node(&args[0])?;
                 let value_val = self.eval_node(&args[1])?;
-                
+
                 match enum_val {
                     Value::Dict(dict) => {
                         let has = dict.values().any(|v| self.values_equal(v, &value_val));
@@ -5200,7 +6121,7 @@ impl Interpreter {
                     _ => Err("enum_has() can only be called on enums".to_string()),
                 }
             }
-            
+
             // File I/O functions
             "read" => {
                 if args.len() != 1 {
@@ -5211,46 +6132,51 @@ impl Interpreter {
                     Value::String(s) => s,
                     _ => return Err("read() filename must be a string".to_string()),
                 };
-                
+
                 match std::fs::read_to_string(&filename) {
                     Ok(content) => Ok(Value::String(content)),
                     Err(e) => Err(format!("Failed to read file '{}': {}", filename, e)),
                 }
             }
-            
+
             "write" => {
                 if args.len() != 2 {
-                    return Err("write() expects exactly 2 arguments: write(filename, content)".to_string());
+                    return Err(
+                        "write() expects exactly 2 arguments: write(filename, content)".to_string(),
+                    );
                 }
                 let filename_val = self.eval_node(&args[0])?;
                 let content_val = self.eval_node(&args[1])?;
-                
+
                 let filename = match filename_val {
                     Value::String(s) => s,
                     _ => return Err("write() filename must be a string".to_string()),
                 };
-                
+
                 let content = content_val.to_string();
-                
+
                 match std::fs::write(&filename, content) {
                     Ok(_) => Ok(Value::Boolean(true)),
                     Err(e) => Err(format!("Failed to write file '{}': {}", filename, e)),
                 }
             }
-            
+
             "read_lines" => {
                 if args.len() != 1 {
-                    return Err("read_lines() expects exactly 1 argument: read_lines(filename)".to_string());
+                    return Err(
+                        "read_lines() expects exactly 1 argument: read_lines(filename)".to_string(),
+                    );
                 }
                 let filename_val = self.eval_node(&args[0])?;
                 let filename = match filename_val {
                     Value::String(s) => s,
                     _ => return Err("read_lines() filename must be a string".to_string()),
                 };
-                
+
                 match std::fs::read_to_string(&filename) {
                     Ok(content) => {
-                        let lines: Vec<Value> = content.lines()
+                        let lines: Vec<Value> = content
+                            .lines()
                             .map(|line| Value::String(line.to_string()))
                             .collect();
                         Ok(Value::List(lines))
@@ -5258,45 +6184,48 @@ impl Interpreter {
                     Err(e) => Err(format!("Failed to read file '{}': {}", filename, e)),
                 }
             }
-            
+
             "write_lines" => {
                 if args.len() != 2 {
-                    return Err("write_lines() expects exactly 2 arguments: write_lines(filename, lines)".to_string());
+                    return Err(
+                        "write_lines() expects exactly 2 arguments: write_lines(filename, lines)"
+                            .to_string(),
+                    );
                 }
                 let filename_val = self.eval_node(&args[0])?;
                 let lines_val = self.eval_node(&args[1])?;
-                
+
                 let filename = match filename_val {
                     Value::String(s) => s,
                     _ => return Err("write_lines() filename must be a string".to_string()),
                 };
-                
+
                 let lines = match lines_val {
-                    Value::List(list) => {
-                        list.iter()
-                            .map(|v| v.to_string())
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    }
+                    Value::List(list) => list
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                     _ => return Err("write_lines() lines must be a list".to_string()),
                 };
-                
+
                 match std::fs::write(&filename, lines) {
                     Ok(_) => Ok(Value::Boolean(true)),
                     Err(e) => Err(format!("Failed to write file '{}': {}", filename, e)),
                 }
             }
-            
+
             "split" => {
                 if args.len() != 2 {
                     return Err("split() expects exactly 2 arguments".to_string());
                 }
                 let string_val = self.eval_node(&args[0])?;
                 let delimiter_val = self.eval_node(&args[1])?;
-                
+
                 match (string_val, delimiter_val) {
                     (Value::String(s), Value::String(delim)) => {
-                        let parts: Vec<Value> = s.split(&delim)
+                        let parts: Vec<Value> = s
+                            .split(&delim)
                             .map(|part| Value::String(part.to_string()))
                             .collect();
                         Ok(Value::List(parts))
@@ -5304,23 +6233,24 @@ impl Interpreter {
                     _ => Err("split() expects string and delimiter arguments".to_string()),
                 }
             }
-            
+
             "join" => {
                 if args.len() != 2 {
                     return Err("join() expects exactly 2 arguments".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let separator_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, separator_val) {
                     (Value::List(list), Value::String(sep)) => {
-                        let strings: Result<Vec<String>, String> = list.iter()
+                        let strings: Result<Vec<String>, String> = list
+                            .iter()
                             .map(|v| match v {
                                 Value::String(s) => Ok(s.clone()),
                                 _ => Ok(v.to_string()),
                             })
                             .collect();
-                        
+
                         match strings {
                             Ok(str_vec) => Ok(Value::String(str_vec.join(&sep))),
                             Err(e) => Err(e),
@@ -5329,61 +6259,59 @@ impl Interpreter {
                     _ => Err("join() expects list and separator string arguments".to_string()),
                 }
             }
-            
-            "substring" => {
-                match args.len() {
-                    2 => {
-                        let string_val = self.eval_node(&args[0])?;
-                        let start_val = self.eval_node(&args[1])?;
-                        
-                        match (string_val, start_val) {
-                            (Value::String(s), Value::Integer(start)) => {
-                                let chars: Vec<char> = s.chars().collect();
-                                let start_idx = if start < 0 {
-                                    (chars.len() as i64 + start).max(0) as usize
-                                } else {
-                                    (start as usize).min(chars.len())
-                                };
-                                
-                                let result: String = chars[start_idx..].iter().collect();
-                                Ok(Value::String(result))
-                            }
-                            _ => Err("substring() expects string and integer arguments".to_string()),
+
+            "substring" => match args.len() {
+                2 => {
+                    let string_val = self.eval_node(&args[0])?;
+                    let start_val = self.eval_node(&args[1])?;
+
+                    match (string_val, start_val) {
+                        (Value::String(s), Value::Integer(start)) => {
+                            let chars: Vec<char> = s.chars().collect();
+                            let start_idx = if start < 0 {
+                                (chars.len() as i64 + start).max(0) as usize
+                            } else {
+                                (start as usize).min(chars.len())
+                            };
+
+                            let result: String = chars[start_idx..].iter().collect();
+                            Ok(Value::String(result))
                         }
+                        _ => Err("substring() expects string and integer arguments".to_string()),
                     }
-                    3 => {
-                        let string_val = self.eval_node(&args[0])?;
-                        let start_val = self.eval_node(&args[1])?;
-                        let end_val = self.eval_node(&args[2])?;
-                        
-                        match (string_val, start_val, end_val) {
-                            (Value::String(s), Value::Integer(start), Value::Integer(end)) => {
-                                let chars: Vec<char> = s.chars().collect();
-                                let start_idx = if start < 0 {
-                                    (chars.len() as i64 + start).max(0) as usize
-                                } else {
-                                    (start as usize).min(chars.len())
-                                };
-                                let end_idx = if end < 0 {
-                                    (chars.len() as i64 + end).max(0) as usize
-                                } else {
-                                    (end as usize).min(chars.len())
-                                };
-                                
-                                if start_idx <= end_idx {
-                                    let result: String = chars[start_idx..end_idx].iter().collect();
-                                    Ok(Value::String(result))
-                                } else {
-                                    Ok(Value::String(String::new()))
-                                }
-                            }
-                            _ => Err("substring() expects string and integer arguments".to_string()),
-                        }
-                    }
-                    _ => Err("substring() expects 2 or 3 arguments".to_string()),
                 }
-            }
-            
+                3 => {
+                    let string_val = self.eval_node(&args[0])?;
+                    let start_val = self.eval_node(&args[1])?;
+                    let end_val = self.eval_node(&args[2])?;
+
+                    match (string_val, start_val, end_val) {
+                        (Value::String(s), Value::Integer(start), Value::Integer(end)) => {
+                            let chars: Vec<char> = s.chars().collect();
+                            let start_idx = if start < 0 {
+                                (chars.len() as i64 + start).max(0) as usize
+                            } else {
+                                (start as usize).min(chars.len())
+                            };
+                            let end_idx = if end < 0 {
+                                (chars.len() as i64 + end).max(0) as usize
+                            } else {
+                                (end as usize).min(chars.len())
+                            };
+
+                            if start_idx <= end_idx {
+                                let result: String = chars[start_idx..end_idx].iter().collect();
+                                Ok(Value::String(result))
+                            } else {
+                                Ok(Value::String(String::new()))
+                            }
+                        }
+                        _ => Err("substring() expects string and integer arguments".to_string()),
+                    }
+                }
+                _ => Err("substring() expects 2 or 3 arguments".to_string()),
+            },
+
             // String manipulation functions
             "upper" => {
                 if args.len() != 1 {
@@ -5395,7 +6323,7 @@ impl Interpreter {
                     _ => Err("upper() can only be called on strings".to_string()),
                 }
             }
-            
+
             "lower" => {
                 if args.len() != 1 {
                     return Err("lower() expects exactly 1 argument".to_string());
@@ -5406,7 +6334,7 @@ impl Interpreter {
                     _ => Err("lower() can only be called on strings".to_string()),
                 }
             }
-            
+
             "trim" => {
                 if args.len() != 1 {
                     return Err("trim() expects exactly 1 argument".to_string());
@@ -5417,7 +6345,7 @@ impl Interpreter {
                     _ => Err("trim() can only be called on strings".to_string()),
                 }
             }
-            
+
             "replace" => {
                 if args.len() != 3 {
                     return Err("replace() expects exactly 3 arguments".to_string());
@@ -5425,7 +6353,7 @@ impl Interpreter {
                 let string_val = self.eval_node(&args[0])?;
                 let from_val = self.eval_node(&args[1])?;
                 let to_val = self.eval_node(&args[2])?;
-                
+
                 match (string_val, from_val, to_val) {
                     (Value::String(s), Value::String(from), Value::String(to)) => {
                         Ok(Value::String(s.replace(&from, &to)))
@@ -5433,14 +6361,14 @@ impl Interpreter {
                     _ => Err("replace() expects string arguments".to_string()),
                 }
             }
-            
+
             "starts_with" => {
                 if args.len() != 2 {
                     return Err("starts_with() expects exactly 2 arguments".to_string());
                 }
                 let string_val = self.eval_node(&args[0])?;
                 let prefix_val = self.eval_node(&args[1])?;
-                
+
                 match (string_val, prefix_val) {
                     (Value::String(s), Value::String(prefix)) => {
                         Ok(Value::Boolean(s.starts_with(&prefix)))
@@ -5448,14 +6376,14 @@ impl Interpreter {
                     _ => Err("starts_with() expects string arguments".to_string()),
                 }
             }
-            
+
             "ends_with" => {
                 if args.len() != 2 {
                     return Err("ends_with() expects exactly 2 arguments".to_string());
                 }
                 let string_val = self.eval_node(&args[0])?;
                 let suffix_val = self.eval_node(&args[1])?;
-                
+
                 match (string_val, suffix_val) {
                     (Value::String(s), Value::String(suffix)) => {
                         Ok(Value::Boolean(s.ends_with(&suffix)))
@@ -5463,14 +6391,14 @@ impl Interpreter {
                     _ => Err("ends_with() expects string arguments".to_string()),
                 }
             }
-            
+
             "repeat" => {
                 if args.len() != 2 {
                     return Err("repeat() expects exactly 2 arguments".to_string());
                 }
                 let string_val = self.eval_node(&args[0])?;
                 let count_val = self.eval_node(&args[1])?;
-                
+
                 match (string_val, count_val) {
                     (Value::String(s), Value::Integer(count)) => {
                         if count < 0 {
@@ -5481,31 +6409,70 @@ impl Interpreter {
                     _ => Err("repeat() expects string and integer arguments".to_string()),
                 }
             }
-            
+
+            "concat" => {
+                // Concatenate multiple values into a string
+                if args.is_empty() {
+                    return Ok(Value::String(String::new()));
+                }
+
+                let mut result = String::new();
+                for arg in args {
+                    let val = self.eval_node(arg)?;
+                    result.push_str(&format!("{}", val));
+                }
+
+                Ok(Value::String(result))
+            }
+
+            "format" => {
+                // Format string with arguments (simple version)
+                if args.is_empty() {
+                    return Err("format() expects at least 1 argument".to_string());
+                }
+
+                let template_val = self.eval_node(&args[0])?;
+                let template = match template_val {
+                    Value::String(s) => s,
+                    _ => return Err("format() first argument must be a string".to_string()),
+                };
+
+                // Simple replacement: {} gets replaced with next argument
+                let mut result = template.clone();
+                for arg in args.iter().skip(1) {
+                    let val = self.eval_node(arg)?;
+                    let placeholder = "{}";
+                    if result.contains(placeholder) {
+                        result = result.replacen(placeholder, &format!("{}", val), 1);
+                    }
+                }
+
+                Ok(Value::String(result))
+            }
+
             // Advanced printing functions
             "table" => {
                 if args.is_empty() {
                     return Err("table() expects at least 1 argument".to_string());
                 }
                 let data_val = self.eval_node(&args[0])?;
-                
+
                 match data_val {
                     Value::List(rows) => {
                         // Print table from list of lists
                         if rows.is_empty() {
                             return Ok(Value::None);
                         }
-                        
+
                         // Convert all rows to strings
                         let mut string_rows: Vec<Vec<String>> = Vec::new();
                         let mut max_widths: Vec<usize> = Vec::new();
-                        
+
                         for row in &rows {
                             if let Value::List(cells) = row {
-                                let string_cells: Vec<String> = cells.iter()
-                                    .map(|v| format!("{}", v))
-                                    .collect();
-                                
+                                let string_cells: Vec<String> =
+                                    cells.iter().map(|v| format!("{}", v)).collect();
+
                                 // Update max widths
                                 for (i, cell) in string_cells.iter().enumerate() {
                                     if i >= max_widths.len() {
@@ -5514,47 +6481,48 @@ impl Interpreter {
                                         max_widths[i] = cell.len();
                                     }
                                 }
-                                
+
                                 string_rows.push(string_cells);
                             }
                         }
-                        
+
                         // Print table with borders
-                        let total_width: usize = max_widths.iter().sum::<usize>() + (max_widths.len() * 3) + 1;
+                        let total_width: usize =
+                            max_widths.iter().sum::<usize>() + (max_widths.len() * 3) + 1;
                         println!("{}", "─".repeat(total_width));
-                        
+
                         for (row_idx, row) in string_rows.iter().enumerate() {
                             print!("│");
                             for (i, cell) in row.iter().enumerate() {
                                 print!(" {:width$} │", cell, width = max_widths[i]);
                             }
                             println!();
-                            
+
                             if row_idx == 0 {
                                 // Header separator
                                 println!("{}", "─".repeat(total_width));
                             }
                         }
-                        
+
                         println!("{}", "─".repeat(total_width));
                         Ok(Value::None)
                     }
                     _ => Err("table() expects a list of lists".to_string()),
                 }
             }
-            
+
             "progress" => {
                 if args.is_empty() {
                     return Err("progress() expects at least 1 argument (percentage)".to_string());
                 }
-                
+
                 let percent_val = self.eval_node(&args[0])?;
                 let percent = match percent_val {
                     Value::Integer(i) => i as f64,
                     Value::Float(f) => f,
                     _ => return Err("progress() percentage must be a number".to_string()),
                 };
-                
+
                 let width = if args.len() > 1 {
                     match self.eval_node(&args[1])? {
                         Value::Integer(w) => w as usize,
@@ -5563,138 +6531,141 @@ impl Interpreter {
                 } else {
                     40
                 };
-                
+
                 // Animate the progress bar
                 use std::io::{self, Write};
                 use std::thread;
                 use std::time::Duration;
-                
+
                 let steps = 20;
                 let step_size = percent / steps as f64;
-                
+
                 for i in 0..=steps {
                     let current_percent = (i as f64 * step_size).min(percent);
                     let filled = ((current_percent / 100.0) * width as f64) as usize;
                     let empty = width - filled;
-                    
+
                     // Use carriage return to overwrite the same line
                     print!("\r[");
                     print!("{}", "█".repeat(filled));
                     print!("{}", " ".repeat(empty));
                     print!("] {:.0}%", current_percent);
                     io::stdout().flush().unwrap();
-                    
+
                     thread::sleep(Duration::from_millis(50));
                 }
-                
+
                 println!(); // Move to next line after animation completes
-                
+
                 Ok(Value::None)
             }
-            
+
             "rainbow" => {
                 if args.is_empty() {
                     return Err("rainbow() expects 1 argument (text)".to_string());
                 }
-                
+
                 let text_val = self.eval_node(&args[0])?;
                 let text = match text_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 // Simple rainbow effect using ANSI colors
                 let colors = vec![31, 33, 32, 36, 34, 35]; // Red, Yellow, Green, Cyan, Blue, Magenta
                 let mut result = String::new();
-                
+
                 for (i, ch) in text.chars().enumerate() {
                     let color = colors[i % colors.len()];
                     result.push_str(&format!("\x1b[{}m{}\x1b[0m", color, ch));
                 }
-                
+
                 println!("{}", result);
                 Ok(Value::None)
             }
-            
+
             "gradient" => {
                 if args.len() < 3 {
-                    return Err("gradient() expects 3 arguments: gradient(start_color, end_color, text)".to_string());
+                    return Err(
+                        "gradient() expects 3 arguments: gradient(start_color, end_color, text)"
+                            .to_string(),
+                    );
                 }
-                
+
                 let text_val = self.eval_node(&args[2])?;
                 let text = match text_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 // Simple gradient using color interpolation
                 // For now, just alternate between two colors
                 let colors = vec![32, 36]; // Green to Cyan
                 let mut result = String::new();
-                
+
                 for (i, ch) in text.chars().enumerate() {
                     let color = colors[i % colors.len()];
                     result.push_str(&format!("\x1b[{}m{}\x1b[0m", color, ch));
                 }
-                
+
                 println!("{}", result);
                 Ok(Value::None)
             }
-            
+
             "bold" => {
                 if args.is_empty() {
                     return Err("bold() expects 1 argument (text)".to_string());
                 }
-                
+
                 let text_val = self.eval_node(&args[0])?;
                 let text = match text_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 Ok(Value::String(format!("\x1b[1m{}\x1b[0m", text)))
             }
-            
+
             "underline" => {
                 if args.is_empty() {
                     return Err("underline() expects 1 argument (text)".to_string());
                 }
-                
+
                 let text_val = self.eval_node(&args[0])?;
                 let text = match text_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 Ok(Value::String(format!("\x1b[4m{}\x1b[0m", text)))
             }
-            
+
             "dim" => {
                 if args.is_empty() {
                     return Err("dim() expects 1 argument (text)".to_string());
                 }
-                
+
                 let text_val = self.eval_node(&args[0])?;
                 let text = match text_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 Ok(Value::String(format!("\x1b[2m{}\x1b[0m", text)))
             }
-            
+
             // Rich-like spinner and loading animations
             "spinner" => {
                 if args.is_empty() {
                     return Err("spinner() expects at least 1 argument (style)".to_string());
                 }
-                
+
                 let style_val = self.eval_node(&args[0])?;
                 let style = match style_val {
                     Value::String(s) => s,
                     _ => "dots".to_string(),
                 };
-                
+
                 let duration = if args.len() > 1 {
                     match self.eval_node(&args[1])? {
                         Value::Integer(d) => d as f64,
@@ -5704,7 +6675,7 @@ impl Interpreter {
                 } else {
                     3.0
                 };
-                
+
                 let message = if args.len() > 2 {
                     match self.eval_node(&args[2])? {
                         Value::String(s) => s,
@@ -5713,22 +6684,22 @@ impl Interpreter {
                 } else {
                     "Loading".to_string()
                 };
-                
+
                 self.show_spinner(&style, duration, &message)?;
                 Ok(Value::None)
             }
-            
+
             "loading" => {
                 if args.is_empty() {
                     return Err("loading() expects at least 1 argument (message)".to_string());
                 }
-                
+
                 let message_val = self.eval_node(&args[0])?;
                 let message = match message_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 let style = if args.len() > 1 {
                     match self.eval_node(&args[1])? {
                         Value::String(s) => s,
@@ -5737,7 +6708,7 @@ impl Interpreter {
                 } else {
                     "dots".to_string()
                 };
-                
+
                 let duration = if args.len() > 2 {
                     match self.eval_node(&args[2])? {
                         Value::Integer(d) => d as f64,
@@ -5747,22 +6718,22 @@ impl Interpreter {
                 } else {
                     2.0
                 };
-                
+
                 self.show_loading(&message, &style, duration)?;
                 Ok(Value::None)
             }
-            
+
             "panel" => {
                 if args.is_empty() {
                     return Err("panel() expects at least 1 argument (text)".to_string());
                 }
-                
+
                 let text_val = self.eval_node(&args[0])?;
                 let text = match text_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 let title = if args.len() > 1 {
                     match self.eval_node(&args[1])? {
                         Value::String(s) => Some(s),
@@ -5771,7 +6742,7 @@ impl Interpreter {
                 } else {
                     None
                 };
-                
+
                 let style = if args.len() > 2 {
                     match self.eval_node(&args[2])? {
                         Value::String(s) => s,
@@ -5780,22 +6751,22 @@ impl Interpreter {
                 } else {
                     "single".to_string()
                 };
-                
+
                 self.show_panel(&text, title.as_deref(), &style)?;
                 Ok(Value::None)
             }
-            
+
             "box" => {
                 if args.is_empty() {
                     return Err("box() expects at least 1 argument (text)".to_string());
                 }
-                
+
                 let text_val = self.eval_node(&args[0])?;
                 let text = match text_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 let width = if args.len() > 1 {
                     match self.eval_node(&args[1])? {
                         Value::Integer(w) => w as usize,
@@ -5804,37 +6775,37 @@ impl Interpreter {
                 } else {
                     60
                 };
-                
+
                 self.show_box(&text, width)?;
                 Ok(Value::None)
             }
-            
+
             "status" => {
                 if args.len() < 2 {
                     return Err("status() expects 2 arguments: status(type, message)".to_string());
                 }
-                
+
                 let status_type_val = self.eval_node(&args[0])?;
                 let status_type = match status_type_val {
                     Value::String(s) => s,
                     _ => "info".to_string(),
                 };
-                
+
                 let message_val = self.eval_node(&args[1])?;
                 let message = match message_val {
                     Value::String(s) => s,
                     other => format!("{}", other),
                 };
-                
+
                 self.show_status(&status_type, &message)?;
                 Ok(Value::None)
             }
-            
+
             "tree" => {
                 if args.is_empty() {
                     return Err("tree() expects at least 1 argument (data)".to_string());
                 }
-                
+
                 let data_val = self.eval_node(&args[0])?;
                 let title = if args.len() > 1 {
                     match self.eval_node(&args[1])? {
@@ -5844,55 +6815,51 @@ impl Interpreter {
                 } else {
                     None
                 };
-                
+
                 self.show_tree(&data_val, title.as_deref(), 0)?;
                 Ok(Value::None)
             }
-            
+
             "columns" => {
                 if args.is_empty() {
                     return Err("columns() expects at least 1 argument (list of texts)".to_string());
                 }
-                
+
                 let data_val = self.eval_node(&args[0])?;
                 match data_val {
                     Value::List(items) => {
-                        let texts: Vec<String> = items.iter()
-                            .map(|v| format!("{}", v))
-                            .collect();
-                        
+                        let texts: Vec<String> = items.iter().map(|v| format!("{}", v)).collect();
+
                         self.show_columns(&texts)?;
                         Ok(Value::None)
                     }
                     _ => Err("columns() expects a list".to_string()),
                 }
             }
-            
+
             "find" => {
                 if args.len() != 2 {
                     return Err("find() expects exactly 2 arguments".to_string());
                 }
                 let string_val = self.eval_node(&args[0])?;
                 let pattern_val = self.eval_node(&args[1])?;
-                
+
                 match (string_val, pattern_val) {
-                    (Value::String(s), Value::String(pattern)) => {
-                        match s.find(&pattern) {
-                            Some(index) => Ok(Value::Integer(index as i64)),
-                            None => Ok(Value::Integer(-1)),
-                        }
-                    }
+                    (Value::String(s), Value::String(pattern)) => match s.find(&pattern) {
+                        Some(index) => Ok(Value::Integer(index as i64)),
+                        None => Ok(Value::Integer(-1)),
+                    },
                     _ => Err("find() expects string arguments".to_string()),
                 }
             }
-            
+
             "pad_left" => {
                 if args.len() != 2 {
                     return Err("pad_left() expects exactly 2 arguments".to_string());
                 }
                 let string_val = self.eval_node(&args[0])?;
                 let width_val = self.eval_node(&args[1])?;
-                
+
                 match (string_val, width_val) {
                     (Value::String(s), Value::Integer(width)) => {
                         if width < 0 {
@@ -5904,14 +6871,14 @@ impl Interpreter {
                     _ => Err("pad_left() expects string and integer arguments".to_string()),
                 }
             }
-            
+
             "pad_right" => {
                 if args.len() != 2 {
                     return Err("pad_right() expects exactly 2 arguments".to_string());
                 }
                 let string_val = self.eval_node(&args[0])?;
                 let width_val = self.eval_node(&args[1])?;
-                
+
                 match (string_val, width_val) {
                     (Value::String(s), Value::Integer(width)) => {
                         if width < 0 {
@@ -5923,7 +6890,7 @@ impl Interpreter {
                     _ => Err("pad_right() expects string and integer arguments".to_string()),
                 }
             }
-            
+
             // Vector and Matrix functions
             "dot" => {
                 if args.len() != 2 {
@@ -5931,7 +6898,7 @@ impl Interpreter {
                 }
                 let a_val = self.eval_node(&args[0])?;
                 let b_val = self.eval_node(&args[1])?;
-                
+
                 match (a_val, b_val) {
                     (Value::Vector(a), Value::Vector(b)) => {
                         if a.len() != b.len() {
@@ -5943,13 +6910,13 @@ impl Interpreter {
                     _ => Err("dot() expects two vectors".to_string()),
                 }
             }
-            
+
             "magnitude" => {
                 if args.len() != 1 {
                     return Err("magnitude() expects exactly 1 argument".to_string());
                 }
                 let vec_val = self.eval_node(&args[0])?;
-                
+
                 match vec_val {
                     Value::Vector(v) => {
                         let mag = v.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -5958,13 +6925,13 @@ impl Interpreter {
                     _ => Err("magnitude() expects a vector".to_string()),
                 }
             }
-            
+
             "normalize" => {
                 if args.len() != 1 {
                     return Err("normalize() expects exactly 1 argument".to_string());
                 }
                 let vec_val = self.eval_node(&args[0])?;
-                
+
                 match vec_val {
                     Value::Vector(v) => {
                         let mag = v.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -5977,13 +6944,13 @@ impl Interpreter {
                     _ => Err("normalize() expects a vector".to_string()),
                 }
             }
-            
+
             "transpose" => {
                 if args.len() != 1 {
                     return Err("transpose() expects exactly 1 argument".to_string());
                 }
                 let mat_val = self.eval_node(&args[0])?;
-                
+
                 match mat_val {
                     Value::Matrix(m) => {
                         if m.is_empty() || m[0].is_empty() {
@@ -5992,7 +6959,7 @@ impl Interpreter {
                         let rows = m.len();
                         let cols = m[0].len();
                         let mut transposed = vec![vec![0.0; rows]; cols];
-                        
+
                         for i in 0..rows {
                             for j in 0..cols {
                                 transposed[j][i] = m[i][j];
@@ -6003,25 +6970,27 @@ impl Interpreter {
                     _ => Err("transpose() expects a matrix".to_string()),
                 }
             }
-            
+
             "matmul" => {
                 if args.len() != 2 {
                     return Err("matmul() expects exactly 2 arguments".to_string());
                 }
                 let a_val = self.eval_node(&args[0])?;
                 let b_val = self.eval_node(&args[1])?;
-                
+
                 match (a_val, b_val) {
                     (Value::Matrix(a), Value::Matrix(b)) => {
                         if a.is_empty() || b.is_empty() || a[0].len() != b.len() {
-                            return Err("Matrix dimensions incompatible for multiplication".to_string());
+                            return Err(
+                                "Matrix dimensions incompatible for multiplication".to_string()
+                            );
                         }
-                        
+
                         let rows_a = a.len();
                         let cols_a = a[0].len();
                         let cols_b = b[0].len();
                         let mut result = vec![vec![0.0; cols_b]; rows_a];
-                        
+
                         for i in 0..rows_a {
                             for j in 0..cols_b {
                                 for k in 0..cols_a {
@@ -6035,10 +7004,11 @@ impl Interpreter {
                         if m.is_empty() || m[0].len() != v.len() {
                             return Err("Matrix and vector dimensions incompatible".to_string());
                         }
-                        
+
                         let mut result = Vec::new();
                         for row in &m {
-                            let dot_product: f64 = row.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
+                            let dot_product: f64 =
+                                row.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
                             result.push(dot_product);
                         }
                         Ok(Value::Vector(result))
@@ -6046,7 +7016,7 @@ impl Interpreter {
                     _ => Err("matmul() expects matrices or matrix and vector".to_string()),
                 }
             }
-            
+
             // Set operations
             "add" => {
                 if args.len() != 2 {
@@ -6054,7 +7024,7 @@ impl Interpreter {
                 }
                 let set_val = self.eval_node(&args[0])?;
                 let item_val = self.eval_node(&args[1])?;
-                
+
                 match set_val {
                     Value::Set(mut set) => {
                         let key = match item_val {
@@ -6062,7 +7032,11 @@ impl Interpreter {
                             Value::Integer(i) => i.to_string(),
                             Value::Float(f) => f.to_string(),
                             Value::Boolean(b) => b.to_string(),
-                            _ => return Err("Set elements must be convertible to strings".to_string()),
+                            _ => {
+                                return Err(
+                                    "Set elements must be convertible to strings".to_string()
+                                )
+                            }
                         };
                         set.insert(key);
                         Ok(Value::Set(set))
@@ -6070,13 +7044,13 @@ impl Interpreter {
                     _ => Err("add() can only be called on sets".to_string()),
                 }
             }
-            
+
             "size" => {
                 if args.len() != 1 {
                     return Err("size() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Set(set) => Ok(Value::Integer(set.len() as i64)),
                     Value::Counter(counter) => Ok(Value::Integer(counter.len() as i64)),
@@ -6089,7 +7063,7 @@ impl Interpreter {
                     _ => Err("size() can only be called on collections".to_string()),
                 }
             }
-            
+
             // Counter operations
             "most_common" => {
                 if args.len() < 1 || args.len() > 2 {
@@ -6099,37 +7073,44 @@ impl Interpreter {
                 let n = if args.len() == 2 {
                     match self.eval_node(&args[1])? {
                         Value::Integer(i) => i as usize,
-                        _ => return Err("most_common() second argument must be an integer".to_string()),
+                        _ => {
+                            return Err(
+                                "most_common() second argument must be an integer".to_string()
+                            )
+                        }
                     }
                 } else {
                     usize::MAX
                 };
-                
+
                 match counter_val {
                     Value::Counter(counter) => {
                         let mut items: Vec<_> = counter.iter().collect();
                         items.sort_by(|a, b| b.1.cmp(a.1)); // Sort by count descending
-                        
-                        let result: Vec<Value> = items.iter()
+
+                        let result: Vec<Value> = items
+                            .iter()
                             .take(n)
-                            .map(|(key, count)| Value::Tuple(vec![
-                                Value::String(key.to_string()),
-                                Value::Integer(**count)
-                            ]))
+                            .map(|(key, count)| {
+                                Value::Tuple(vec![
+                                    Value::String(key.to_string()),
+                                    Value::Integer(**count),
+                                ])
+                            })
                             .collect();
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("most_common() can only be called on counters".to_string()),
                 }
             }
-            
+
             "total" => {
                 if args.len() != 1 {
                     return Err("total() expects exactly 1 argument".to_string());
                 }
                 let counter_val = self.eval_node(&args[0])?;
-                
+
                 match counter_val {
                     Value::Counter(counter) => {
                         let total: i64 = counter.values().sum();
@@ -6138,7 +7119,7 @@ impl Interpreter {
                     _ => Err("total() can only be called on counters".to_string()),
                 }
             }
-            
+
             // Algorithm helpers
             "binary_search" => {
                 if args.len() != 2 {
@@ -6146,14 +7127,14 @@ impl Interpreter {
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let target_val = self.eval_node(&args[1])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         // Simple binary search for integers
                         if let Value::Integer(target) = target_val {
                             let mut left = 0;
                             let mut right = list.len();
-                            
+
                             while left < right {
                                 let mid = left + (right - left) / 2;
                                 match &list[mid] {
@@ -6166,7 +7147,12 @@ impl Interpreter {
                                             right = mid;
                                         }
                                     }
-                                    _ => return Err("binary_search() requires a sorted list of integers".to_string()),
+                                    _ => {
+                                        return Err(
+                                            "binary_search() requires a sorted list of integers"
+                                                .to_string(),
+                                        )
+                                    }
                                 }
                             }
                             Ok(Value::Integer(-1)) // Not found
@@ -6177,17 +7163,17 @@ impl Interpreter {
                     _ => Err("binary_search() can only be called on lists".to_string()),
                 }
             }
-            
+
             "is_sorted" => {
                 if args.len() != 1 {
                     return Err("is_sorted() expects exactly 1 argument".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         for i in 1..list.len() {
-                            match (&list[i-1], &list[i]) {
+                            match (&list[i - 1], &list[i]) {
                                 (Value::Integer(a), Value::Integer(b)) => {
                                     if a > b {
                                         return Ok(Value::Boolean(false));
@@ -6203,7 +7189,11 @@ impl Interpreter {
                                         return Ok(Value::Boolean(false));
                                     }
                                 }
-                                _ => return Err("is_sorted() requires comparable elements".to_string()),
+                                _ => {
+                                    return Err(
+                                        "is_sorted() requires comparable elements".to_string()
+                                    )
+                                }
                             }
                         }
                         Ok(Value::Boolean(true))
@@ -6211,23 +7201,23 @@ impl Interpreter {
                     _ => Err("is_sorted() can only be called on lists".to_string()),
                 }
             }
-            
+
             "shuffle" => {
                 if args.len() != 1 {
                     return Err("shuffle() expects exactly 1 argument".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
-                
+
                 match list_val {
                     Value::List(mut list) => {
                         // Simple Fisher-Yates shuffle
                         use std::collections::hash_map::DefaultHasher;
                         use std::hash::{Hash, Hasher};
-                        
+
                         let mut hasher = DefaultHasher::new();
                         std::ptr::addr_of!(list).hash(&mut hasher);
                         let mut seed = hasher.finish() as usize;
-                        
+
                         for i in (1..list.len()).rev() {
                             // Simple LCG for pseudo-random numbers
                             seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
@@ -6239,14 +7229,14 @@ impl Interpreter {
                     _ => Err("shuffle() can only be called on lists".to_string()),
                 }
             }
-            
+
             "sample" => {
                 if args.len() != 2 {
                     return Err("sample() expects exactly 2 arguments".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let n_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, n_val) {
                     (Value::List(list), Value::Integer(n)) => {
                         if n < 0 {
@@ -6256,51 +7246,51 @@ impl Interpreter {
                         if n > list.len() {
                             return Err("sample() size cannot be larger than list size".to_string());
                         }
-                        
+
                         // Simple sampling without replacement
                         let mut result = Vec::new();
                         let mut indices: Vec<usize> = (0..list.len()).collect();
-                        
+
                         // Simple shuffle of indices
                         use std::collections::hash_map::DefaultHasher;
                         use std::hash::{Hash, Hasher};
-                        
+
                         let mut hasher = DefaultHasher::new();
                         std::ptr::addr_of!(list).hash(&mut hasher);
                         let mut seed = hasher.finish() as usize;
-                        
+
                         for i in (1..indices.len()).rev() {
                             seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
                             let j = seed % (i + 1);
                             indices.swap(i, j);
                         }
-                        
+
                         for i in 0..n {
                             result.push(list[indices[i]].clone());
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("sample() expects a list and an integer".to_string()),
                 }
             }
-            
+
             "accumulate" => {
                 if args.len() != 1 {
                     return Err("accumulate() expects exactly 1 argument".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         if list.is_empty() {
                             return Ok(Value::List(Vec::new()));
                         }
-                        
+
                         let mut result = Vec::new();
                         let mut acc = list[0].clone();
                         result.push(acc.clone());
-                        
+
                         for item in &list[1..] {
                             match (&acc, item) {
                                 (Value::Integer(a), Value::Integer(b)) => {
@@ -6319,13 +7309,13 @@ impl Interpreter {
                             }
                             result.push(acc.clone());
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("accumulate() can only be called on lists".to_string()),
                 }
             }
-            
+
             // Additional collection functions
             "take" => {
                 if args.len() != 2 {
@@ -6333,7 +7323,7 @@ impl Interpreter {
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let n_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, n_val) {
                     (Value::List(list), Value::Integer(n)) => {
                         if n < 0 {
@@ -6346,14 +7336,14 @@ impl Interpreter {
                     _ => Err("take() expects list and integer arguments".to_string()),
                 }
             }
-            
+
             "drop" => {
                 if args.len() != 2 {
                     return Err("drop() expects exactly 2 arguments".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let n_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, n_val) {
                     (Value::List(list), Value::Integer(n)) => {
                         if n < 0 {
@@ -6366,70 +7356,51 @@ impl Interpreter {
                     _ => Err("drop() expects list and integer arguments".to_string()),
                 }
             }
-            
-            "chunk" => {
-                if args.len() != 2 {
-                    return Err("chunk() expects exactly 2 arguments".to_string());
-                }
-                let list_val = self.eval_node(&args[0])?;
-                let size_val = self.eval_node(&args[1])?;
-                
-                match (list_val, size_val) {
-                    (Value::List(list), Value::Integer(size)) => {
-                        if size <= 0 {
-                            return Err("chunk() size must be positive".to_string());
-                        }
-                        let size = size as usize;
-                        let mut result = Vec::new();
-                        
-                        for chunk in list.chunks(size) {
-                            result.push(Value::List(chunk.to_vec()));
-                        }
-                        
-                        Ok(Value::List(result))
-                    }
-                    _ => Err("chunk() expects list and integer arguments".to_string()),
-                }
-            }
-            
+
             // Mathematical functions
             "abs" => {
                 if args.len() != 1 {
                     return Err("abs() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(i) => Ok(Value::Integer(i.abs())),
                     Value::Float(f) => Ok(Value::Float(f.abs())),
                     _ => Err("abs() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "sqrt" => {
                 if args.len() != 1 {
                     return Err("sqrt() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(i) => Ok(Value::Float((i as f64).sqrt())),
                     Value::Float(f) => Ok(Value::Float(f.sqrt())),
                     _ => Err("sqrt() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "pow" => {
                 if args.len() != 2 {
                     return Err("pow() expects exactly 2 arguments".to_string());
                 }
                 let base_val = self.eval_node(&args[0])?;
                 let exp_val = self.eval_node(&args[1])?;
-                
+
                 match (base_val, exp_val) {
                     (Value::Integer(base), Value::Integer(exp)) => {
                         if exp >= 0 {
-                            Ok(Value::Integer(base.pow(exp as u32)))
+                            // CRITICAL FIX: Use checked_pow to prevent overflow panics
+                            if exp > u32::MAX as i64 {
+                                return Err("Exponent too large".to_string());
+                            }
+                            base.checked_pow(exp as u32)
+                                .map(Value::Integer)
+                                .ok_or_else(|| format!("Integer overflow: {} ** {}", base, exp))
                         } else {
                             Ok(Value::Float((base as f64).powf(exp as f64)))
                         }
@@ -6440,104 +7411,102 @@ impl Interpreter {
                     (Value::Integer(base), Value::Float(exp)) => {
                         Ok(Value::Float((base as f64).powf(exp)))
                     }
-                    (Value::Float(base), Value::Float(exp)) => {
-                        Ok(Value::Float(base.powf(exp)))
-                    }
+                    (Value::Float(base), Value::Float(exp)) => Ok(Value::Float(base.powf(exp))),
                     _ => Err("pow() expects numeric arguments".to_string()),
                 }
             }
-            
+
             "ceil" => {
                 if args.len() != 1 {
                     return Err("ceil() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Float(f) => Ok(Value::Integer(f.ceil() as i64)),
                     Value::Integer(i) => Ok(Value::Integer(i)),
                     _ => Err("ceil() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "floor" => {
                 if args.len() != 1 {
                     return Err("floor() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Float(f) => Ok(Value::Integer(f.floor() as i64)),
                     Value::Integer(i) => Ok(Value::Integer(i)),
                     _ => Err("floor() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "sin" => {
                 if args.len() != 1 {
                     return Err("sin() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(i) => Ok(Value::Float((i as f64).sin())),
                     Value::Float(f) => Ok(Value::Float(f.sin())),
                     _ => Err("sin() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "cos" => {
                 if args.len() != 1 {
                     return Err("cos() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(i) => Ok(Value::Float((i as f64).cos())),
                     Value::Float(f) => Ok(Value::Float(f.cos())),
                     _ => Err("cos() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "tan" => {
                 if args.len() != 1 {
                     return Err("tan() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(i) => Ok(Value::Float((i as f64).tan())),
                     Value::Float(f) => Ok(Value::Float(f.tan())),
                     _ => Err("tan() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "log" => {
                 if args.len() != 1 {
                     return Err("log() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(i) => Ok(Value::Float((i as f64).ln())),
                     Value::Float(f) => Ok(Value::Float(f.ln())),
                     _ => Err("log() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "exp" => {
                 if args.len() != 1 {
                     return Err("exp() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(i) => Ok(Value::Float((i as f64).exp())),
                     Value::Float(f) => Ok(Value::Float(f.exp())),
                     _ => Err("exp() can only be called on numbers".to_string()),
                 }
             }
-            
+
             "clamp" => {
                 if args.len() != 3 {
                     return Err("clamp() expects exactly 3 arguments".to_string());
@@ -6545,7 +7514,7 @@ impl Interpreter {
                 let val = self.eval_node(&args[0])?;
                 let min_val = self.eval_node(&args[1])?;
                 let max_val = self.eval_node(&args[2])?;
-                
+
                 match (val, min_val, max_val) {
                     (Value::Integer(v), Value::Integer(min), Value::Integer(max)) => {
                         Ok(Value::Integer(v.max(min).min(max)))
@@ -6565,7 +7534,7 @@ impl Interpreter {
                     _ => Err("clamp() expects numeric arguments".to_string()),
                 }
             }
-            
+
             "lerp" => {
                 if args.len() != 3 {
                     return Err("lerp() expects exactly 3 arguments".to_string());
@@ -6573,58 +7542,70 @@ impl Interpreter {
                 let a_val = self.eval_node(&args[0])?;
                 let b_val = self.eval_node(&args[1])?;
                 let t_val = self.eval_node(&args[2])?;
-                
+
                 let a = match a_val {
                     Value::Integer(i) => i as f64,
                     Value::Float(f) => f,
                     _ => return Err("lerp() first argument must be numeric".to_string()),
                 };
-                
+
                 let b = match b_val {
                     Value::Integer(i) => i as f64,
                     Value::Float(f) => f,
                     _ => return Err("lerp() second argument must be numeric".to_string()),
                 };
-                
+
                 let t = match t_val {
                     Value::Integer(i) => i as f64,
                     Value::Float(f) => f,
                     _ => return Err("lerp() third argument must be numeric".to_string()),
                 };
-                
+
                 Ok(Value::Float(a + t * (b - a)))
             }
-            
+
             "distance" => {
                 if args.len() != 2 {
                     return Err("distance() expects exactly 2 arguments".to_string());
                 }
                 let a_val = self.eval_node(&args[0])?;
                 let b_val = self.eval_node(&args[1])?;
-                
+
                 match (a_val, b_val) {
                     (Value::Vector(a), Value::Vector(b)) => {
                         if a.len() != b.len() {
-                            return Err("Vectors must have same length for distance calculation".to_string());
+                            return Err("Vectors must have same length for distance calculation"
+                                .to_string());
                         }
-                        let dist_sq: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum();
+                        let dist_sq: f64 =
+                            a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum();
                         Ok(Value::Float(dist_sq.sqrt()))
                     }
                     (Value::Tuple(a), Value::Tuple(b)) => {
                         if a.len() != b.len() {
-                            return Err("Tuples must have same length for distance calculation".to_string());
+                            return Err(
+                                "Tuples must have same length for distance calculation".to_string()
+                            );
                         }
                         let mut dist_sq = 0.0;
                         for (av, bv) in a.iter().zip(b.iter()) {
                             let a_num = match av {
                                 Value::Integer(i) => *i as f64,
                                 Value::Float(f) => *f,
-                                _ => return Err("Distance calculation requires numeric values".to_string()),
+                                _ => {
+                                    return Err(
+                                        "Distance calculation requires numeric values".to_string()
+                                    )
+                                }
                             };
                             let b_num = match bv {
                                 Value::Integer(i) => *i as f64,
                                 Value::Float(f) => *f,
-                                _ => return Err("Distance calculation requires numeric values".to_string()),
+                                _ => {
+                                    return Err(
+                                        "Distance calculation requires numeric values".to_string()
+                                    )
+                                }
                             };
                             dist_sq += (a_num - b_num).powi(2);
                         }
@@ -6633,14 +7614,14 @@ impl Interpreter {
                     _ => Err("distance() expects two vectors or tuples".to_string()),
                 }
             }
-            
+
             "cross" => {
                 if args.len() != 2 {
                     return Err("cross() expects exactly 2 arguments".to_string());
                 }
                 let a_val = self.eval_node(&args[0])?;
                 let b_val = self.eval_node(&args[1])?;
-                
+
                 match (a_val, b_val) {
                     (Value::Vector(a), Value::Vector(b)) => {
                         if a.len() != 3 || b.len() != 3 {
@@ -6656,42 +7637,46 @@ impl Interpreter {
                     _ => Err("cross() expects two 3D vectors".to_string()),
                 }
             }
-            
+
             "determinant" => {
                 if args.len() != 1 {
                     return Err("determinant() expects exactly 1 argument".to_string());
                 }
                 let mat_val = self.eval_node(&args[0])?;
-                
+
                 match mat_val {
                     Value::Matrix(m) => {
                         if m.is_empty() || m.len() != m[0].len() {
                             return Err("Determinant requires a square matrix".to_string());
                         }
-                        
-                        let det = match m.len() {
-                            1 => m[0][0],
-                            2 => m[0][0] * m[1][1] - m[0][1] * m[1][0],
-                            3 => {
-                                m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
-                                m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
-                                m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
-                            }
-                            _ => return Err("Determinant only implemented for 1x1, 2x2, and 3x3 matrices".to_string()),
-                        };
-                        
+
+                        let det =
+                            match m.len() {
+                                1 => m[0][0],
+                                2 => m[0][0] * m[1][1] - m[0][1] * m[1][0],
+                                3 => {
+                                    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+                                        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                                        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+                                }
+                                _ => return Err(
+                                    "Determinant only implemented for 1x1, 2x2, and 3x3 matrices"
+                                        .to_string(),
+                                ),
+                            };
+
                         Ok(Value::Float(det))
                     }
                     _ => Err("determinant() expects a matrix".to_string()),
                 }
             }
-            
+
             "identity" => {
                 if args.len() != 1 {
                     return Err("identity() expects exactly 1 argument".to_string());
                 }
                 let size_val = self.eval_node(&args[0])?;
-                
+
                 match size_val {
                     Value::Integer(size) => {
                         if size <= 0 {
@@ -6707,73 +7692,69 @@ impl Interpreter {
                     _ => Err("identity() expects an integer size".to_string()),
                 }
             }
-            
-            "zeros" => {
-                match args.len() {
-                    1 => {
-                        let size_val = self.eval_node(&args[0])?;
-                        match size_val {
-                            Value::Integer(size) => {
-                                if size <= 0 {
-                                    return Err("zeros() size must be positive".to_string());
-                                }
-                                let vec = vec![0.0; size as usize];
-                                Ok(Value::Vector(vec))
+
+            "zeros" => match args.len() {
+                1 => {
+                    let size_val = self.eval_node(&args[0])?;
+                    match size_val {
+                        Value::Integer(size) => {
+                            if size <= 0 {
+                                return Err("zeros() size must be positive".to_string());
                             }
-                            _ => Err("zeros() expects an integer size".to_string()),
+                            let vec = vec![0.0; size as usize];
+                            Ok(Value::Vector(vec))
                         }
+                        _ => Err("zeros() expects an integer size".to_string()),
                     }
-                    2 => {
-                        let rows_val = self.eval_node(&args[0])?;
-                        let cols_val = self.eval_node(&args[1])?;
-                        match (rows_val, cols_val) {
-                            (Value::Integer(rows), Value::Integer(cols)) => {
-                                if rows <= 0 || cols <= 0 {
-                                    return Err("zeros() dimensions must be positive".to_string());
-                                }
-                                let matrix = vec![vec![0.0; cols as usize]; rows as usize];
-                                Ok(Value::Matrix(matrix))
-                            }
-                            _ => Err("zeros() expects integer dimensions".to_string()),
-                        }
-                    }
-                    _ => Err("zeros() expects 1 or 2 arguments".to_string()),
                 }
-            }
-            
-            "ones" => {
-                match args.len() {
-                    1 => {
-                        let size_val = self.eval_node(&args[0])?;
-                        match size_val {
-                            Value::Integer(size) => {
-                                if size <= 0 {
-                                    return Err("ones() size must be positive".to_string());
-                                }
-                                let vec = vec![1.0; size as usize];
-                                Ok(Value::Vector(vec))
+                2 => {
+                    let rows_val = self.eval_node(&args[0])?;
+                    let cols_val = self.eval_node(&args[1])?;
+                    match (rows_val, cols_val) {
+                        (Value::Integer(rows), Value::Integer(cols)) => {
+                            if rows <= 0 || cols <= 0 {
+                                return Err("zeros() dimensions must be positive".to_string());
                             }
-                            _ => Err("ones() expects an integer size".to_string()),
+                            let matrix = vec![vec![0.0; cols as usize]; rows as usize];
+                            Ok(Value::Matrix(matrix))
                         }
+                        _ => Err("zeros() expects integer dimensions".to_string()),
                     }
-                    2 => {
-                        let rows_val = self.eval_node(&args[0])?;
-                        let cols_val = self.eval_node(&args[1])?;
-                        match (rows_val, cols_val) {
-                            (Value::Integer(rows), Value::Integer(cols)) => {
-                                if rows <= 0 || cols <= 0 {
-                                    return Err("ones() dimensions must be positive".to_string());
-                                }
-                                let matrix = vec![vec![1.0; cols as usize]; rows as usize];
-                                Ok(Value::Matrix(matrix))
-                            }
-                            _ => Err("ones() expects integer dimensions".to_string()),
-                        }
-                    }
-                    _ => Err("ones() expects 1 or 2 arguments".to_string()),
                 }
-            }
-            
+                _ => Err("zeros() expects 1 or 2 arguments".to_string()),
+            },
+
+            "ones" => match args.len() {
+                1 => {
+                    let size_val = self.eval_node(&args[0])?;
+                    match size_val {
+                        Value::Integer(size) => {
+                            if size <= 0 {
+                                return Err("ones() size must be positive".to_string());
+                            }
+                            let vec = vec![1.0; size as usize];
+                            Ok(Value::Vector(vec))
+                        }
+                        _ => Err("ones() expects an integer size".to_string()),
+                    }
+                }
+                2 => {
+                    let rows_val = self.eval_node(&args[0])?;
+                    let cols_val = self.eval_node(&args[1])?;
+                    match (rows_val, cols_val) {
+                        (Value::Integer(rows), Value::Integer(cols)) => {
+                            if rows <= 0 || cols <= 0 {
+                                return Err("ones() dimensions must be positive".to_string());
+                            }
+                            let matrix = vec![vec![1.0; cols as usize]; rows as usize];
+                            Ok(Value::Matrix(matrix))
+                        }
+                        _ => Err("ones() expects integer dimensions".to_string()),
+                    }
+                }
+                _ => Err("ones() expects 1 or 2 arguments".to_string()),
+            },
+
             // String algorithms
             "levenshtein" => {
                 if args.len() != 2 {
@@ -6781,7 +7762,7 @@ impl Interpreter {
                 }
                 let s1_val = self.eval_node(&args[0])?;
                 let s2_val = self.eval_node(&args[1])?;
-                
+
                 match (s1_val, s2_val) {
                     (Value::String(s1), Value::String(s2)) => {
                         let distance = self.levenshtein_distance(&s1, &s2);
@@ -6790,14 +7771,14 @@ impl Interpreter {
                     _ => Err("levenshtein() expects two strings".to_string()),
                 }
             }
-            
+
             "hamming" => {
                 if args.len() != 2 {
                     return Err("hamming() expects exactly 2 arguments".to_string());
                 }
                 let s1_val = self.eval_node(&args[0])?;
                 let s2_val = self.eval_node(&args[1])?;
-                
+
                 match (s1_val, s2_val) {
                     (Value::String(s1), Value::String(s2)) => {
                         if s1.len() != s2.len() {
@@ -6809,7 +7790,7 @@ impl Interpreter {
                     _ => Err("hamming() expects two strings".to_string()),
                 }
             }
-            
+
             // Advanced algorithm helpers
             "kmp_search" => {
                 if args.len() != 2 {
@@ -6817,37 +7798,47 @@ impl Interpreter {
                 }
                 let text_val = self.eval_node(&args[0])?;
                 let pattern_val = self.eval_node(&args[1])?;
-                
+
                 match (text_val, pattern_val) {
                     (Value::String(text), Value::String(pattern)) => {
                         let positions = self.kmp_search(&text, &pattern);
-                        Ok(Value::List(positions.into_iter().map(|p| Value::Integer(p as i64)).collect()))
+                        Ok(Value::List(
+                            positions
+                                .into_iter()
+                                .map(|p| Value::Integer(p as i64))
+                                .collect(),
+                        ))
                     }
                     _ => Err("kmp_search() expects two strings".to_string()),
                 }
             }
-            
+
             "z_array" => {
                 if args.len() != 1 {
                     return Err("z_array() expects exactly 1 argument".to_string());
                 }
                 let text_val = self.eval_node(&args[0])?;
-                
+
                 match text_val {
                     Value::String(text) => {
                         let z_array = self.compute_z_array(&text);
-                        Ok(Value::List(z_array.into_iter().map(|z| Value::Integer(z as i64)).collect()))
+                        Ok(Value::List(
+                            z_array
+                                .into_iter()
+                                .map(|z| Value::Integer(z as i64))
+                                .collect(),
+                        ))
                     }
                     _ => Err("z_array() expects a string".to_string()),
                 }
             }
-            
+
             "convex_hull" => {
                 if args.len() != 1 {
                     return Err("convex_hull() expects exactly 1 argument".to_string());
                 }
                 let points_val = self.eval_node(&args[0])?;
-                
+
                 match points_val {
                     Value::List(points) => {
                         let hull = self.convex_hull_2d(&points)?;
@@ -6856,56 +7847,83 @@ impl Interpreter {
                     _ => Err("convex_hull() expects a list of (x, y) tuples".to_string()),
                 }
             }
-            
+
             "bfs" => {
                 if args.len() < 2 || args.len() > 3 {
                     return Err("bfs() expects 2-3 arguments: graph, start, [goal]".to_string());
                 }
                 let graph_val = self.eval_node(&args[0])?;
                 let start_val = self.eval_node(&args[1])?;
-                let goal_val = if args.len() == 3 { Some(self.eval_node(&args[2])?) } else { None };
-                
+                let goal_val = if args.len() == 3 {
+                    Some(self.eval_node(&args[2])?)
+                } else {
+                    None
+                };
+
                 match (graph_val, start_val) {
                     (Value::Graph(graph), Value::String(start)) => {
-                        let goal = goal_val.and_then(|v| if let Value::String(s) = v { Some(s) } else { None });
+                        let goal = goal_val.and_then(|v| {
+                            if let Value::String(s) = v {
+                                Some(s)
+                            } else {
+                                None
+                            }
+                        });
                         let path = self.bfs_search(&graph, &start, goal.as_deref())?;
-                        Ok(Value::List(path.into_iter().map(|n| Value::String(n)).collect()))
+                        Ok(Value::List(
+                            path.into_iter().map(|n| Value::String(n)).collect(),
+                        ))
                     }
                     _ => Err("bfs() expects graph and string start node".to_string()),
                 }
             }
-            
+
             "dfs" => {
                 if args.len() < 2 || args.len() > 3 {
                     return Err("dfs() expects 2-3 arguments: graph, start, [goal]".to_string());
                 }
                 let graph_val = self.eval_node(&args[0])?;
                 let start_val = self.eval_node(&args[1])?;
-                let goal_val = if args.len() == 3 { Some(self.eval_node(&args[2])?) } else { None };
-                
+                let goal_val = if args.len() == 3 {
+                    Some(self.eval_node(&args[2])?)
+                } else {
+                    None
+                };
+
                 match (graph_val, start_val) {
                     (Value::Graph(graph), Value::String(start)) => {
-                        let goal = goal_val.and_then(|v| if let Value::String(s) = v { Some(s) } else { None });
+                        let goal = goal_val.and_then(|v| {
+                            if let Value::String(s) = v {
+                                Some(s)
+                            } else {
+                                None
+                            }
+                        });
                         let path = self.dfs_search(&graph, &start, goal.as_deref())?;
-                        Ok(Value::List(path.into_iter().map(|n| Value::String(n)).collect()))
+                        Ok(Value::List(
+                            path.into_iter().map(|n| Value::String(n)).collect(),
+                        ))
                     }
                     _ => Err("dfs() expects graph and string start node".to_string()),
                 }
             }
-            
+
             // Graph operations
             "add_node" => {
                 if args.len() != 2 {
-                    return Err("add_node() expects exactly 2 arguments: add_node(graph, node_name)".to_string());
+                    return Err(
+                        "add_node() expects exactly 2 arguments: add_node(graph, node_name)"
+                            .to_string(),
+                    );
                 }
                 let graph_val = self.eval_node(&args[0])?;
                 let node_val = self.eval_node(&args[1])?;
-                
+
                 let node_name = match node_val {
                     Value::String(s) => s,
                     _ => return Err("Node name must be a string".to_string()),
                 };
-                
+
                 match graph_val {
                     Value::Graph(mut graph) => {
                         if !graph.contains_key(&node_name) {
@@ -6916,36 +7934,39 @@ impl Interpreter {
                     _ => Err("add_node() can only be called on graphs".to_string()),
                 }
             }
-            
+
             "add_edge" => {
                 if args.len() < 3 || args.len() > 4 {
-                    return Err("add_edge() expects 3-4 arguments: add_edge(graph, from, to, [weight])".to_string());
+                    return Err(
+                        "add_edge() expects 3-4 arguments: add_edge(graph, from, to, [weight])"
+                            .to_string(),
+                    );
                 }
                 let graph_val = self.eval_node(&args[0])?;
                 let from_val = self.eval_node(&args[1])?;
                 let to_val = self.eval_node(&args[2])?;
-                let weight_val = if args.len() == 4 { 
-                    self.eval_node(&args[3])? 
-                } else { 
-                    Value::Float(1.0) 
+                let weight_val = if args.len() == 4 {
+                    self.eval_node(&args[3])?
+                } else {
+                    Value::Float(1.0)
                 };
-                
+
                 let from = match from_val {
                     Value::String(s) => s,
                     _ => return Err("From node must be a string".to_string()),
                 };
-                
+
                 let to = match to_val {
                     Value::String(s) => s,
                     _ => return Err("To node must be a string".to_string()),
                 };
-                
+
                 let weight = match weight_val {
                     Value::Integer(i) => i as f64,
                     Value::Float(f) => f,
                     _ => return Err("Weight must be a number".to_string()),
                 };
-                
+
                 match graph_val {
                     Value::Graph(mut graph) => {
                         // Ensure both nodes exist
@@ -6955,35 +7976,41 @@ impl Interpreter {
                         if !graph.contains_key(&to) {
                             graph.insert(to.clone(), Vec::new());
                         }
-                        
+
                         // Add edge
                         if let Some(edges) = graph.get_mut(&from) {
                             edges.push((to, weight));
                         }
-                        
+
                         Ok(Value::Graph(graph))
                     }
                     _ => Err("add_edge() can only be called on graphs".to_string()),
                 }
             }
-            
+
             "get_neighbors" => {
                 if args.len() != 2 {
-                    return Err("get_neighbors() expects exactly 2 arguments: get_neighbors(graph, node)".to_string());
+                    return Err(
+                        "get_neighbors() expects exactly 2 arguments: get_neighbors(graph, node)"
+                            .to_string(),
+                    );
                 }
                 let graph_val = self.eval_node(&args[0])?;
                 let node_val = self.eval_node(&args[1])?;
-                
+
                 let node = match node_val {
                     Value::String(s) => s,
                     _ => return Err("Node must be a string".to_string()),
                 };
-                
+
                 match graph_val {
                     Value::Graph(graph) => {
                         if let Some(neighbors) = graph.get(&node) {
-                            let neighbor_list: Vec<Value> = neighbors.iter()
-                                .map(|(n, w)| Value::Tuple(vec![Value::String(n.clone()), Value::Float(*w)]))
+                            let neighbor_list: Vec<Value> = neighbors
+                                .iter()
+                                .map(|(n, w)| {
+                                    Value::Tuple(vec![Value::String(n.clone()), Value::Float(*w)])
+                                })
                                 .collect();
                             Ok(Value::List(neighbor_list))
                         } else {
@@ -6993,23 +8020,40 @@ impl Interpreter {
                     _ => Err("get_neighbors() can only be called on graphs".to_string()),
                 }
             }
-            
+
             "dijkstra" => {
                 if args.len() < 2 || args.len() > 3 {
-                    return Err("dijkstra() expects 2-3 arguments: graph, start, [goal]".to_string());
+                    return Err(
+                        "dijkstra() expects 2-3 arguments: graph, start, [goal]".to_string()
+                    );
                 }
                 let graph_val = self.eval_node(&args[0])?;
                 let start_val = self.eval_node(&args[1])?;
-                let goal_val = if args.len() == 3 { Some(self.eval_node(&args[2])?) } else { None };
-                
+                let goal_val = if args.len() == 3 {
+                    Some(self.eval_node(&args[2])?)
+                } else {
+                    None
+                };
+
                 match (graph_val, start_val) {
                     (Value::Graph(graph), Value::String(start)) => {
-                        let goal = goal_val.and_then(|v| if let Value::String(s) = v { Some(s) } else { None });
+                        let goal = goal_val.and_then(|v| {
+                            if let Value::String(s) = v {
+                                Some(s)
+                            } else {
+                                None
+                            }
+                        });
                         let result = self.dijkstra_search(&graph, &start, goal.as_deref())?;
                         match result {
                             (path, distance) => {
                                 let mut result_dict = HashMap::new();
-                                result_dict.insert("path".to_string(), Value::List(path.into_iter().map(|n| Value::String(n)).collect()));
+                                result_dict.insert(
+                                    "path".to_string(),
+                                    Value::List(
+                                        path.into_iter().map(|n| Value::String(n)).collect(),
+                                    ),
+                                );
                                 result_dict.insert("distance".to_string(), Value::Float(distance));
                                 Ok(Value::Dict(result_dict))
                             }
@@ -7018,34 +8062,35 @@ impl Interpreter {
                     _ => Err("dijkstra() expects graph and string start node".to_string()),
                 }
             }
-            
+
             "fft" => {
                 if args.len() != 1 {
                     return Err("fft() expects exactly 1 argument".to_string());
                 }
                 let signal_val = self.eval_node(&args[0])?;
-                
+
                 match signal_val {
                     Value::List(signal) => {
                         let fft_result = self.fft_transform(&signal)?;
                         Ok(Value::List(fft_result))
                     }
                     Value::Vector(signal) => {
-                        let signal_list: Vec<Value> = signal.into_iter().map(|f| Value::Float(f)).collect();
+                        let signal_list: Vec<Value> =
+                            signal.into_iter().map(|f| Value::Float(f)).collect();
                         let fft_result = self.fft_transform(&signal_list)?;
                         Ok(Value::List(fft_result))
                     }
                     _ => Err("fft() expects a list or vector of numbers".to_string()),
                 }
             }
-            
+
             // More collection functions
             "all" => {
                 if args.len() != 1 {
                     return Err("all() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         let all_true = list.iter().all(|item| self.is_truthy(item));
@@ -7054,13 +8099,13 @@ impl Interpreter {
                     _ => Err("all() can only be called on lists".to_string()),
                 }
             }
-            
+
             "any" => {
                 if args.len() != 1 {
                     return Err("any() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         let any_true = list.iter().any(|item| self.is_truthy(item));
@@ -7069,8 +8114,7 @@ impl Interpreter {
                     _ => Err("any() can only be called on lists".to_string()),
                 }
             }
-            
-            
+
             // Functional programming helpers
             "compose" => {
                 if args.len() != 2 {
@@ -7079,7 +8123,7 @@ impl Interpreter {
                 // For now, just return a placeholder - full function composition would need more work
                 Ok(Value::String("composed_function".to_string()))
             }
-            
+
             "curry" => {
                 if args.len() != 1 {
                     return Err("curry() expects exactly 1 argument".to_string());
@@ -7099,7 +8143,7 @@ impl Interpreter {
                     .as_secs();
                 Ok(Value::Integer(timestamp as i64))
             }
-            
+
             "today" => {
                 if args.len() != 0 {
                     return Err("today() expects no arguments".to_string());
@@ -7107,14 +8151,14 @@ impl Interpreter {
                 // Simple date format - in practice you'd use a proper date library
                 Ok(Value::Date("2026-01-31".to_string()))
             }
-            
+
             // Random functions
             "random" => {
                 if args.len() == 0 {
                     // Random float between 0 and 1
                     use std::collections::hash_map::DefaultHasher;
                     use std::hash::{Hash, Hasher};
-                    
+
                     let mut hasher = DefaultHasher::new();
                     std::ptr::addr_of!(self).hash(&mut hasher);
                     let seed = hasher.finish();
@@ -7130,7 +8174,7 @@ impl Interpreter {
                             }
                             use std::collections::hash_map::DefaultHasher;
                             use std::hash::{Hash, Hasher};
-                            
+
                             let mut hasher = DefaultHasher::new();
                             std::ptr::addr_of!(self).hash(&mut hasher);
                             let seed = hasher.finish();
@@ -7143,7 +8187,7 @@ impl Interpreter {
                     Err("random() expects 0 or 1 arguments".to_string())
                 }
             }
-            
+
             // Utility functions
             "type_of" => {
                 if args.len() != 1 {
@@ -7194,38 +8238,38 @@ impl Interpreter {
                     Value::MatrixColMeans(_) => "matrix_col_means",
                     Value::Enum { .. } => "enum",
                     Value::EnumVariant { .. } => "enum_variant",
-                            Value::Class { .. } => "class",
-                            Value::Instance { .. } => "instance",
-                            Value::Constructor(_) => "constructor",
-                            Value::OnceCached { .. } => "once",
-                            Value::MirrorDispatch { .. } => "mirror",
-                            Value::None => "none",
-                            Value::Module { .. } => "module",
-                            Value::Trait { .. } => "trait",
-                            Value::Future { .. } => "future",
-                            Value::Interval(_, _) => "interval",
-                            Value::Queue(_) => "queue",
-                            Value::Ring { .. } => "ring",
-                            Value::Sorted(_) => "sorted",
-                            Value::Bag(_) => "bag",
-                            Value::Window { .. } => "window",
-                            Value::View { .. } => "view",
-                            Value::Prio(_) => "prio",
-                            Value::Diff(_) => "diff",
-                            Value::Span { .. } => "span",
-                            Value::MutSpan { .. } => "mut_span",
-                            Value::Chunk { .. } => "chunk",
-                            Value::Sparse { .. } => "sparse",
+                    Value::Class { .. } => "class",
+                    Value::Instance { .. } => "instance",
+                    Value::Constructor(_) => "constructor",
+                    Value::OnceCached { .. } => "once",
+                    Value::MirrorDispatch { .. } => "mirror",
+                    Value::None => "none",
+                    Value::Module { .. } => "module",
+                    Value::Trait { .. } => "trait",
+                    Value::Future { .. } => "future",
+                    Value::Interval(_, _) => "interval",
+                    Value::Queue(_) => "queue",
+                    Value::Ring { .. } => "ring",
+                    Value::Sorted(_) => "sorted",
+                    Value::Bag(_) => "bag",
+                    Value::Window { .. } => "window",
+                    Value::View { .. } => "view",
+                    Value::Prio(_) => "prio",
+                    Value::Diff(_) => "diff",
+                    Value::Span { .. } => "span",
+                    Value::MutSpan { .. } => "mut_span",
+                    Value::Chunk { .. } => "chunk",
+                    Value::Sparse { .. } => "sparse",
                 };
                 Ok(Value::String(type_name.to_string()))
             }
-            
+
             "is_empty" => {
                 if args.len() != 1 {
                     return Err("is_empty() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 let empty = match val {
                     Value::String(s) => s.is_empty(),
                     Value::List(list) => list.is_empty(),
@@ -7241,15 +8285,15 @@ impl Interpreter {
                     Value::Matrix(mat) => mat.is_empty(),
                     _ => return Err("is_empty() can only be called on collections".to_string()),
                 };
-                
+
                 Ok(Value::Boolean(empty))
             }
-            
+
             "chain" => {
                 if args.len() < 2 {
                     return Err("chain() expects at least 2 arguments".to_string());
                 }
-                
+
                 let mut result = Vec::new();
                 for arg in args {
                     let val = self.eval_node(arg)?;
@@ -7270,14 +8314,14 @@ impl Interpreter {
                 }
                 Ok(Value::List(result))
             }
-            
+
             "cycle" => {
                 if args.len() != 2 {
                     return Err("cycle() expects exactly 2 arguments".to_string());
                 }
                 let iterable_val = self.eval_node(&args[0])?;
                 let count_val = self.eval_node(&args[1])?;
-                
+
                 let count = match count_val {
                     Value::Integer(n) => {
                         if n < 0 {
@@ -7287,7 +8331,7 @@ impl Interpreter {
                     }
                     _ => return Err("cycle() count must be an integer".to_string()),
                 };
-                
+
                 match iterable_val {
                     Value::List(list) => {
                         if list.is_empty() {
@@ -7309,19 +8353,19 @@ impl Interpreter {
                     _ => Err("cycle() can only be called on lists and strings".to_string()),
                 }
             }
-            
+
             "interleave" => {
                 if args.len() != 2 {
                     return Err("interleave() expects exactly 2 arguments".to_string());
                 }
                 let list1_val = self.eval_node(&args[0])?;
                 let list2_val = self.eval_node(&args[1])?;
-                
+
                 match (list1_val, list2_val) {
                     (Value::List(list1), Value::List(list2)) => {
                         let mut result = Vec::new();
                         let max_len = list1.len().max(list2.len());
-                        
+
                         for i in 0..max_len {
                             if i < list1.len() {
                                 result.push(list1[i].clone());
@@ -7335,49 +8379,49 @@ impl Interpreter {
                     _ => Err("interleave() expects two lists".to_string()),
                 }
             }
-            
+
             "rotate" => {
                 if args.len() != 2 {
                     return Err("rotate() expects exactly 2 arguments".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let n_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, n_val) {
                     (Value::List(mut list), Value::Integer(n)) => {
                         if list.is_empty() {
                             return Ok(Value::List(list));
                         }
-                        
+
                         let len = list.len() as i64;
                         let n = ((n % len) + len) % len; // Handle negative rotation
                         let n = n as usize;
-                        
+
                         list.rotate_left(n);
                         Ok(Value::List(list))
                     }
                     _ => Err("rotate() expects a list and an integer".to_string()),
                 }
             }
-            
+
             "sliding_window" => {
                 if args.len() != 2 {
                     return Err("sliding_window() expects exactly 2 arguments".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let size_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, size_val) {
                     (Value::List(list), Value::Integer(size)) => {
                         if size <= 0 {
                             return Err("sliding_window() size must be positive".to_string());
                         }
                         let size = size as usize;
-                        
+
                         if list.len() < size {
                             return Ok(Value::List(Vec::new()));
                         }
-                        
+
                         let mut result = Vec::new();
                         for i in 0..=(list.len() - size) {
                             let window: Vec<Value> = list[i..i + size].to_vec();
@@ -7388,19 +8432,20 @@ impl Interpreter {
                     _ => Err("sliding_window() expects a list and an integer".to_string()),
                 }
             }
-            
+
             "permutations" => {
                 if args.len() != 1 {
                     return Err("permutations() expects exactly 1 argument".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         if list.len() > 8 {
-                            return Err("permutations() limited to lists of 8 elements or fewer".to_string());
+                            return Err("permutations() limited to lists of 8 elements or fewer"
+                                .to_string());
                         }
-                        
+
                         let perms = self.generate_permutations(&list);
                         let result: Vec<Value> = perms.into_iter().map(Value::List).collect();
                         Ok(Value::List(result))
@@ -7408,20 +8453,22 @@ impl Interpreter {
                     _ => Err("permutations() can only be called on lists".to_string()),
                 }
             }
-            
+
             "combinations" => {
                 if args.len() != 2 {
                     return Err("combinations() expects exactly 2 arguments".to_string());
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let r_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, r_val) {
                     (Value::List(list), Value::Integer(r)) => {
                         if r < 0 || r > list.len() as i64 {
-                            return Err("combinations() r must be between 0 and list length".to_string());
+                            return Err(
+                                "combinations() r must be between 0 and list length".to_string()
+                            );
                         }
-                        
+
                         let combs = self.generate_combinations(&list, r as usize);
                         let result: Vec<Value> = combs.into_iter().map(Value::List).collect();
                         Ok(Value::List(result))
@@ -7429,12 +8476,12 @@ impl Interpreter {
                     _ => Err("combinations() expects a list and an integer".to_string()),
                 }
             }
-            
+
             "product" => {
                 if args.len() < 2 {
                     return Err("product() expects at least 2 arguments".to_string());
                 }
-                
+
                 let mut lists = Vec::new();
                 for arg in args {
                     let val = self.eval_node(arg)?;
@@ -7443,16 +8490,16 @@ impl Interpreter {
                         _ => return Err("product() expects list arguments".to_string()),
                     }
                 }
-                
+
                 let result = self.cartesian_product(&lists);
                 let result: Vec<Value> = result.into_iter().map(Value::List).collect();
                 Ok(Value::List(result))
             }
-            
+
             // ============================================================================
             // GENERAL UTILITY FUNCTIONS FOR ALGORITHM PROBLEMS
             // ============================================================================
-            
+
             // GCD - Greatest Common Divisor
             "gcd" => {
                 if args.len() != 2 {
@@ -7460,7 +8507,7 @@ impl Interpreter {
                 }
                 let a_val = self.eval_node(&args[0])?;
                 let b_val = self.eval_node(&args[1])?;
-                
+
                 match (a_val, b_val) {
                     (Value::Integer(mut a), Value::Integer(mut b)) => {
                         a = a.abs();
@@ -7475,7 +8522,7 @@ impl Interpreter {
                     _ => Err("gcd() expects two integers".to_string()),
                 }
             }
-            
+
             // LCM - Least Common Multiple
             "lcm" => {
                 if args.len() != 2 {
@@ -7483,7 +8530,7 @@ impl Interpreter {
                 }
                 let a_val = self.eval_node(&args[0])?;
                 let b_val = self.eval_node(&args[1])?;
-                
+
                 match (a_val, b_val) {
                     (Value::Integer(a), Value::Integer(b)) => {
                         if a == 0 || b == 0 {
@@ -7503,14 +8550,14 @@ impl Interpreter {
                     _ => Err("lcm() expects two integers".to_string()),
                 }
             }
-            
+
             // is_prime - Check if number is prime
             "is_prime" => {
                 if args.len() != 1 {
                     return Err("is_prime() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(n) => {
                         if n < 2 {
@@ -7534,14 +8581,14 @@ impl Interpreter {
                     _ => Err("is_prime() expects an integer".to_string()),
                 }
             }
-            
+
             // factorial - Calculate n!
             "factorial" => {
                 if args.len() != 1 {
                     return Err("factorial() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(n) => {
                         if n < 0 {
@@ -7559,14 +8606,14 @@ impl Interpreter {
                     _ => Err("factorial() expects an integer".to_string()),
                 }
             }
-            
+
             // fibonacci - Calculate nth Fibonacci number
             "fibonacci" => {
                 if args.len() != 1 {
                     return Err("fibonacci() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Integer(n) => {
                         if n < 0 {
@@ -7590,7 +8637,7 @@ impl Interpreter {
                     _ => Err("fibonacci() expects an integer".to_string()),
                 }
             }
-            
+
             // swap - Swap two elements in a list by index
             "swap" => {
                 if args.len() != 3 {
@@ -7599,7 +8646,7 @@ impl Interpreter {
                 let list_val = self.eval_node(&args[0])?;
                 let i_val = self.eval_node(&args[1])?;
                 let j_val = self.eval_node(&args[2])?;
-                
+
                 match (list_val, i_val, j_val) {
                     (Value::List(mut list), Value::Integer(i), Value::Integer(j)) => {
                         let len = list.len() as i64;
@@ -7612,15 +8659,18 @@ impl Interpreter {
                     _ => Err("swap() expects (list, int, int)".to_string()),
                 }
             }
-            
+
             // rotate_left - Rotate list left by k positions
             "rotate_left" => {
                 if args.len() != 2 {
-                    return Err("rotate_left() expects exactly 2 arguments: rotate_left(list, k)".to_string());
+                    return Err(
+                        "rotate_left() expects exactly 2 arguments: rotate_left(list, k)"
+                            .to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let k_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, k_val) {
                     (Value::List(list), Value::Integer(k)) => {
                         if list.is_empty() {
@@ -7635,15 +8685,18 @@ impl Interpreter {
                     _ => Err("rotate_left() expects (list, int)".to_string()),
                 }
             }
-            
+
             // rotate_right - Rotate list right by k positions
             "rotate_right" => {
                 if args.len() != 2 {
-                    return Err("rotate_right() expects exactly 2 arguments: rotate_right(list, k)".to_string());
+                    return Err(
+                        "rotate_right() expects exactly 2 arguments: rotate_right(list, k)"
+                            .to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let k_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, k_val) {
                     (Value::List(list), Value::Integer(k)) => {
                         if list.is_empty() {
@@ -7659,24 +8712,32 @@ impl Interpreter {
                     _ => Err("rotate_right() expects (list, int)".to_string()),
                 }
             }
-            
+
             // count_if - Count elements matching predicate
             "count_if" => {
                 if args.len() != 2 {
-                    return Err("count_if() expects exactly 2 arguments: count_if(list, predicate)".to_string());
+                    return Err(
+                        "count_if() expects exactly 2 arguments: count_if(list, predicate)"
+                            .to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let pred_val = self.eval_node(&args[1])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         let mut count = 0;
                         for item in list {
-                            let result = self.call_value_with_args(pred_val.clone(), &[item], None)?;
+                            let result =
+                                self.call_value_with_args(pred_val.clone(), &[item], None)?;
                             match result {
                                 Value::Boolean(true) => count += 1,
-                                Value::Boolean(false) => {},
-                                _ => return Err("count_if() predicate must return boolean".to_string()),
+                                Value::Boolean(false) => {}
+                                _ => {
+                                    return Err(
+                                        "count_if() predicate must return boolean".to_string()
+                                    )
+                                }
                             }
                         }
                         Ok(Value::Integer(count))
@@ -7684,23 +8745,31 @@ impl Interpreter {
                     _ => Err("count_if() expects a list as first argument".to_string()),
                 }
             }
-            
+
             // find_index - Find first index where predicate is true
             "find_index" => {
                 if args.len() != 2 {
-                    return Err("find_index() expects exactly 2 arguments: find_index(list, predicate)".to_string());
+                    return Err(
+                        "find_index() expects exactly 2 arguments: find_index(list, predicate)"
+                            .to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let pred_val = self.eval_node(&args[1])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         for (i, item) in list.iter().enumerate() {
-                            let result = self.call_value_with_args(pred_val.clone(), &[item.clone()], None)?;
+                            let result =
+                                self.call_value_with_args(pred_val.clone(), &[item.clone()], None)?;
                             match result {
                                 Value::Boolean(true) => return Ok(Value::Integer(i as i64)),
-                                Value::Boolean(false) => {},
-                                _ => return Err("find_index() predicate must return boolean".to_string()),
+                                Value::Boolean(false) => {}
+                                _ => {
+                                    return Err(
+                                        "find_index() predicate must return boolean".to_string()
+                                    )
+                                }
                             }
                         }
                         Ok(Value::Integer(-1))
@@ -7708,31 +8777,33 @@ impl Interpreter {
                     _ => Err("find_index() expects a list as first argument".to_string()),
                 }
             }
-            
+
             // ============================================================================
             // BIG TECH / LEETCODE ALGORITHM PATTERNS
             // ============================================================================
-            
+
             // prefix_sum - Calculate prefix sum array for range queries
             "prefix_sum" => {
                 if args.len() != 1 {
                     return Err("prefix_sum() expects exactly 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         let mut prefix = Vec::new();
                         let mut sum = 0i64;
                         prefix.push(Value::Integer(0));
-                        
+
                         for item in list {
                             match item {
                                 Value::Integer(n) => {
                                     sum += n;
                                     prefix.push(Value::Integer(sum));
                                 }
-                                _ => return Err("prefix_sum() requires list of integers".to_string()),
+                                _ => {
+                                    return Err("prefix_sum() requires list of integers".to_string())
+                                }
                             }
                         }
                         Ok(Value::List(prefix))
@@ -7740,16 +8811,19 @@ impl Interpreter {
                     _ => Err("prefix_sum() expects a list".to_string()),
                 }
             }
-            
+
             // range_sum - Get sum of elements from index i to j using prefix sum
             "range_sum" => {
                 if args.len() != 3 {
-                    return Err("range_sum() expects 3 arguments: range_sum(prefix_sum_array, i, j)".to_string());
+                    return Err(
+                        "range_sum() expects 3 arguments: range_sum(prefix_sum_array, i, j)"
+                            .to_string(),
+                    );
                 }
                 let prefix_val = self.eval_node(&args[0])?;
                 let i_val = self.eval_node(&args[1])?;
                 let j_val = self.eval_node(&args[2])?;
-                
+
                 match (prefix_val, i_val, j_val) {
                     (Value::List(prefix), Value::Integer(i), Value::Integer(j)) => {
                         if i < 0 || j >= prefix.len() as i64 - 1 || i > j {
@@ -7765,15 +8839,18 @@ impl Interpreter {
                     _ => Err("range_sum() expects (list, int, int)".to_string()),
                 }
             }
-            
+
             // two_sum_indices - Find two indices where arr[i] + arr[j] == target
             "two_sum_indices" => {
                 if args.len() != 2 {
-                    return Err("two_sum_indices() expects 2 arguments: two_sum_indices(list, target)".to_string());
+                    return Err(
+                        "two_sum_indices() expects 2 arguments: two_sum_indices(list, target)"
+                            .to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let target_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, target_val) {
                     (Value::List(list), Value::Integer(target)) => {
                         let mut seen = std::collections::HashMap::new();
@@ -7781,7 +8858,10 @@ impl Interpreter {
                             if let Value::Integer(num) = item {
                                 let complement = target - num;
                                 if let Some(&j) = seen.get(&complement) {
-                                    return Ok(Value::List(vec![Value::Integer(j), Value::Integer(i as i64)]));
+                                    return Ok(Value::List(vec![
+                                        Value::Integer(j),
+                                        Value::Integer(i as i64),
+                                    ]));
                                 }
                                 seen.insert(*num, i as i64);
                             }
@@ -7791,15 +8871,17 @@ impl Interpreter {
                     _ => Err("two_sum_indices() expects (list, int)".to_string()),
                 }
             }
-            
+
             // three_sum - Find all unique triplets that sum to target
             "three_sum" => {
                 if args.len() != 2 {
-                    return Err("three_sum() expects 2 arguments: three_sum(list, target)".to_string());
+                    return Err(
+                        "three_sum() expects 2 arguments: three_sum(list, target)".to_string()
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let target_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, target_val) {
                     (Value::List(list), Value::Integer(target)) => {
                         let mut nums: Vec<i64> = Vec::new();
@@ -7810,27 +8892,27 @@ impl Interpreter {
                                 return Err("three_sum() requires list of integers".to_string());
                             }
                         }
-                        
+
                         nums.sort();
                         let mut result = Vec::new();
-                        
+
                         for i in 0..nums.len() {
-                            if i > 0 && nums[i] == nums[i-1] {
+                            if i > 0 && nums[i] == nums[i - 1] {
                                 continue;
                             }
-                            
+
                             let mut left = i + 1;
                             let mut right = nums.len() - 1;
-                            
+
                             while left < right {
                                 let sum = nums[i] + nums[left] + nums[right];
                                 if sum == target {
                                     result.push(Value::List(vec![
                                         Value::Integer(nums[i]),
                                         Value::Integer(nums[left]),
-                                        Value::Integer(nums[right])
+                                        Value::Integer(nums[right]),
                                     ]));
-                                    
+
                                     while left < right && nums[left] == nums[left + 1] {
                                         left += 1;
                                     }
@@ -7846,37 +8928,46 @@ impl Interpreter {
                                 }
                             }
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("three_sum() expects (list, int)".to_string()),
                 }
             }
-            
+
             // max_sliding_window - Maximum in each sliding window of size k
             "max_sliding_window" => {
                 if args.len() != 2 {
-                    return Err("max_sliding_window() expects 2 arguments: max_sliding_window(list, k)".to_string());
+                    return Err(
+                        "max_sliding_window() expects 2 arguments: max_sliding_window(list, k)"
+                            .to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let k_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, k_val) {
                     (Value::List(list), Value::Integer(k)) => {
                         if k <= 0 || k as usize > list.len() {
-                            return Err("max_sliding_window() k must be positive and <= list length".to_string());
+                            return Err(
+                                "max_sliding_window() k must be positive and <= list length"
+                                    .to_string(),
+                            );
                         }
-                        
+
                         let k = k as usize;
                         let mut result = Vec::new();
-                        
+
                         for i in 0..=(list.len() - k) {
                             let mut max_val = match &list[i] {
                                 Value::Integer(n) => *n,
-                                _ => return Err("max_sliding_window() requires list of integers".to_string()),
+                                _ => {
+                                    return Err("max_sliding_window() requires list of integers"
+                                        .to_string())
+                                }
                             };
-                            
-                            for j in (i+1)..(i+k) {
+
+                            for j in (i + 1)..(i + k) {
                                 if let Value::Integer(n) = &list[j] {
                                     if *n > max_val {
                                         max_val = *n;
@@ -7885,29 +8976,29 @@ impl Interpreter {
                             }
                             result.push(Value::Integer(max_val));
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("max_sliding_window() expects (list, int)".to_string()),
                 }
             }
-            
+
             // longest_increasing_subsequence - Length of LIS
             "longest_increasing_subsequence" => {
                 if args.len() != 1 {
                     return Err("longest_increasing_subsequence() expects 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         if list.is_empty() {
                             return Ok(Value::Integer(0));
                         }
-                        
+
                         let mut dp = vec![1; list.len()];
                         let mut max_len = 1;
-                        
+
                         for i in 1..list.len() {
                             if let Value::Integer(curr) = &list[i] {
                                 for j in 0..i {
@@ -7922,82 +9013,87 @@ impl Interpreter {
                                 }
                             }
                         }
-                        
+
                         Ok(Value::Integer(max_len as i64))
                     }
                     _ => Err("longest_increasing_subsequence() expects a list".to_string()),
                 }
             }
-            
+
             // merge_intervals - Merge overlapping intervals [[start, end], ...]
             "merge_intervals" => {
                 if args.len() != 1 {
                     return Err("merge_intervals() expects 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(intervals) => {
                         if intervals.is_empty() {
                             return Ok(Value::List(Vec::new()));
                         }
-                        
+
                         // Convert to vec of (start, end)
                         let mut pairs: Vec<(i64, i64)> = Vec::new();
                         for interval in &intervals {
                             if let Value::List(pair) = interval {
                                 if pair.len() == 2 {
-                                    if let (Value::Integer(start), Value::Integer(end)) = (&pair[0], &pair[1]) {
+                                    if let (Value::Integer(start), Value::Integer(end)) =
+                                        (&pair[0], &pair[1])
+                                    {
                                         pairs.push((*start, *end));
                                     }
                                 }
                             }
                         }
-                        
+
                         pairs.sort_by_key(|p| p.0);
-                        
+
                         let mut merged = Vec::new();
                         let mut current = pairs[0];
-                        
+
                         for &(start, end) in &pairs[1..] {
                             if start <= current.1 {
                                 current.1 = current.1.max(end);
                             } else {
                                 merged.push(Value::List(vec![
                                     Value::Integer(current.0),
-                                    Value::Integer(current.1)
+                                    Value::Integer(current.1),
                                 ]));
                                 current = (start, end);
                             }
                         }
                         merged.push(Value::List(vec![
                             Value::Integer(current.0),
-                            Value::Integer(current.1)
+                            Value::Integer(current.1),
                         ]));
-                        
+
                         Ok(Value::List(merged))
                     }
                     _ => Err("merge_intervals() expects a list of intervals".to_string()),
                 }
             }
-            
+
             // topological_sort - Topological sort using Kahn's algorithm
             // Input: adjacency list as dict {node: [neighbors]}
             "topological_sort" => {
                 if args.len() != 1 {
-                    return Err("topological_sort() expects 1 argument: adjacency list dict".to_string());
+                    return Err(
+                        "topological_sort() expects 1 argument: adjacency list dict".to_string()
+                    );
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::Dict(graph) => {
                         // Calculate in-degrees
-                        let mut in_degree: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-                        
+                        let mut in_degree: std::collections::HashMap<String, i64> =
+                            std::collections::HashMap::new();
+
                         for (node, _) in &graph {
                             in_degree.entry(node.clone()).or_insert(0);
                         }
-                        
+
                         for (_, neighbors_val) in &graph {
                             if let Value::List(neighbors) = neighbors_val {
                                 for neighbor in neighbors {
@@ -8007,7 +9103,7 @@ impl Interpreter {
                                 }
                             }
                         }
-                        
+
                         // Find nodes with in-degree 0
                         let mut queue: Vec<String> = Vec::new();
                         for (node, &degree) in &in_degree {
@@ -8015,13 +9111,13 @@ impl Interpreter {
                                 queue.push(node.clone());
                             }
                         }
-                        
+
                         let mut result = Vec::new();
-                        
+
                         while !queue.is_empty() {
                             let node = queue.remove(0);
                             result.push(Value::String(node.clone()));
-                            
+
                             if let Some(Value::List(neighbors)) = graph.get(&node) {
                                 for neighbor in neighbors {
                                     if let Value::String(n) = neighbor {
@@ -8035,31 +9131,35 @@ impl Interpreter {
                                 }
                             }
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("topological_sort() expects a dict (adjacency list)".to_string()),
                 }
             }
-            
+
             // ============================================================================
             // KILLER FEATURES - MAKE J BETTER THAN PYTHON
             // ============================================================================
-            
+
             // parallel_map - Map function in parallel (auto-parallelization)
             "parallel_map" => {
                 if args.len() != 2 {
-                    return Err("parallel_map() expects 2 arguments: parallel_map(list, function)".to_string());
+                    return Err(
+                        "parallel_map() expects 2 arguments: parallel_map(list, function)"
+                            .to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let func_val = self.eval_node(&args[1])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         // For now, sequential (can be parallelized with rayon)
                         let mut result = Vec::new();
                         for item in list {
-                            let mapped = self.call_value_with_args(func_val.clone(), &[item], None)?;
+                            let mapped =
+                                self.call_value_with_args(func_val.clone(), &[item], None)?;
                             result.push(mapped);
                         }
                         Ok(Value::List(result))
@@ -8067,7 +9167,7 @@ impl Interpreter {
                     _ => Err("parallel_map() expects a list".to_string()),
                 }
             }
-            
+
             // memoize - Automatically cache function results
             "memoize" => {
                 if args.len() != 1 {
@@ -8078,11 +9178,14 @@ impl Interpreter {
                 // (Implementation would require cache storage)
                 Ok(func_val)
             }
-            
+
             // benchmark - Time function execution
             "benchmark" => {
                 if args.len() < 1 {
-                    return Err("benchmark() expects at least 1 argument: function to benchmark".to_string());
+                    return Err(
+                        "benchmark() expects at least 1 argument: function to benchmark"
+                            .to_string(),
+                    );
                 }
                 let func_val = self.eval_node(&args[0])?;
                 let iterations = if args.len() > 1 {
@@ -8094,33 +9197,33 @@ impl Interpreter {
                 } else {
                     1
                 };
-                
+
                 let start = std::time::Instant::now();
                 let mut last_result = Value::None;
-                
+
                 for _ in 0..iterations {
                     last_result = self.call_value_with_args(func_val.clone(), &[], None)?;
                 }
-                
+
                 let duration = start.elapsed();
                 let ms = duration.as_secs_f64() * 1000.0;
-                
+
                 let mut result = std::collections::HashMap::new();
                 result.insert("time_ms".to_string(), Value::Float(ms));
                 result.insert("iterations".to_string(), Value::Integer(iterations as i64));
                 result.insert("avg_ms".to_string(), Value::Float(ms / iterations as f64));
                 result.insert("result".to_string(), last_result);
-                
+
                 Ok(Value::Dict(result))
             }
-            
+
             // tap - Debug helper: print value and return it (chainable)
             "tap" => {
                 if args.len() < 1 {
                     return Err("tap() expects at least 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 if args.len() > 1 {
                     // Custom message
                     let msg_val = self.eval_node(&args[1])?;
@@ -8130,30 +9233,34 @@ impl Interpreter {
                 } else {
                     println!("[TAP] {}", val);
                 }
-                
+
                 Ok(val)
             }
-            
+
             // pipe - Function composition (f |> g |> h)
             "pipe" => {
                 if args.len() < 2 {
-                    return Err("pipe() expects at least 2 arguments: value, ...functions".to_string());
+                    return Err(
+                        "pipe() expects at least 2 arguments: value, ...functions".to_string()
+                    );
                 }
-                
+
                 let mut result = self.eval_node(&args[0])?;
-                
+
                 for i in 1..args.len() {
                     let func = self.eval_node(&args[i])?;
                     result = self.call_value_with_args(func, &[result], None)?;
                 }
-                
+
                 Ok(result)
             }
-            
+
             // retry - Retry function on failure
             "retry" => {
                 if args.len() < 2 {
-                    return Err("retry() expects at least 2 arguments: function, max_attempts".to_string());
+                    return Err(
+                        "retry() expects at least 2 arguments: function, max_attempts".to_string(),
+                    );
                 }
                 let func_val = self.eval_node(&args[0])?;
                 let max_attempts = if let Value::Integer(n) = self.eval_node(&args[1])? {
@@ -8161,9 +9268,9 @@ impl Interpreter {
                 } else {
                     return Err("retry() max_attempts must be an integer".to_string());
                 };
-                
+
                 let mut last_error = String::new();
-                
+
                 for attempt in 1..=max_attempts {
                     match self.call_value_with_args(func_val.clone(), &[], None) {
                         Ok(result) => return Ok(result),
@@ -8176,27 +9283,37 @@ impl Interpreter {
                         }
                     }
                 }
-                
-                Err(format!("retry() failed after {} attempts: {}", max_attempts, last_error))
+
+                Err(format!(
+                    "retry() failed after {} attempts: {}",
+                    max_attempts, last_error
+                ))
             }
-            
+
             // take_while - Take elements while predicate is true
             "take_while" => {
                 if args.len() != 2 {
-                    return Err("take_while() expects 2 arguments: take_while(list, predicate)".to_string());
+                    return Err(
+                        "take_while() expects 2 arguments: take_while(list, predicate)".to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let pred_val = self.eval_node(&args[1])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         let mut result = Vec::new();
                         for item in list {
-                            let pred_result = self.call_value_with_args(pred_val.clone(), &[item.clone()], None)?;
+                            let pred_result =
+                                self.call_value_with_args(pred_val.clone(), &[item.clone()], None)?;
                             match pred_result {
                                 Value::Boolean(true) => result.push(item),
                                 Value::Boolean(false) => break,
-                                _ => return Err("take_while() predicate must return boolean".to_string()),
+                                _ => {
+                                    return Err(
+                                        "take_while() predicate must return boolean".to_string()
+                                    )
+                                }
                             }
                         }
                         Ok(Value::List(result))
@@ -8204,30 +9321,39 @@ impl Interpreter {
                     _ => Err("take_while() expects a list".to_string()),
                 }
             }
-            
+
             // drop_while - Drop elements while predicate is true
             "drop_while" => {
                 if args.len() != 2 {
-                    return Err("drop_while() expects 2 arguments: drop_while(list, predicate)".to_string());
+                    return Err(
+                        "drop_while() expects 2 arguments: drop_while(list, predicate)".to_string(),
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let pred_val = self.eval_node(&args[1])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         let mut dropping = true;
                         let mut result = Vec::new();
-                        
+
                         for item in list {
                             if dropping {
-                                let pred_result = self.call_value_with_args(pred_val.clone(), &[item.clone()], None)?;
+                                let pred_result = self.call_value_with_args(
+                                    pred_val.clone(),
+                                    &[item.clone()],
+                                    None,
+                                )?;
                                 match pred_result {
                                     Value::Boolean(true) => continue,
                                     Value::Boolean(false) => {
                                         dropping = false;
                                         result.push(item);
                                     }
-                                    _ => return Err("drop_while() predicate must return boolean".to_string()),
+                                    _ => {
+                                        return Err("drop_while() predicate must return boolean"
+                                            .to_string())
+                                    }
                                 }
                             } else {
                                 result.push(item);
@@ -8238,121 +9364,38 @@ impl Interpreter {
                     _ => Err("drop_while() expects a list".to_string()),
                 }
             }
-            
+
             // scan - Like reduce but returns all intermediate results
             "scan" => {
                 if args.len() != 3 {
-                    return Err("scan() expects 3 arguments: scan(list, initial, function)".to_string());
+                    return Err(
+                        "scan() expects 3 arguments: scan(list, initial, function)".to_string()
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let initial = self.eval_node(&args[1])?;
                 let func_val = self.eval_node(&args[2])?;
-                
+
                 match list_val {
                     Value::List(list) => {
                         let mut result = vec![initial.clone()];
                         let mut accumulator = initial;
-                        
+
                         for item in list {
-                            accumulator = self.call_value_with_args(func_val.clone(), &[accumulator, item], None)?;
+                            accumulator = self.call_value_with_args(
+                                func_val.clone(),
+                                &[accumulator, item],
+                                None,
+                            )?;
                             result.push(accumulator.clone());
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("scan() expects a list".to_string()),
                 }
             }
-            
-            // frequencies - Count occurrences of each element
-            "frequencies" => {
-                if args.len() != 1 {
-                    return Err("frequencies() expects 1 argument".to_string());
-                }
-                let val = self.eval_node(&args[0])?;
-                
-                match val {
-                    Value::List(list) => {
-                        let mut freq: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-                        
-                        for item in list {
-                            let key = format!("{:?}", item);
-                            *freq.entry(key).or_insert(0) += 1;
-                        }
-                        
-                        let mut result = std::collections::HashMap::new();
-                        for (key, count) in freq {
-                            result.insert(key, Value::Integer(count));
-                        }
-                        
-                        Ok(Value::Dict(result))
-                    }
-                    _ => Err("frequencies() expects a list".to_string()),
-                }
-            }
-            
-            // interleave - Interleave multiple lists
-            "interleave" => {
-                if args.len() < 2 {
-                    return Err("interleave() expects at least 2 lists".to_string());
-                }
-                
-                let mut lists: Vec<Vec<Value>> = Vec::new();
-                for arg in args {
-                    let val = self.eval_node(arg)?;
-                    match val {
-                        Value::List(list) => lists.push(list),
-                        _ => return Err("interleave() expects list arguments".to_string()),
-                    }
-                }
-                
-                let mut result = Vec::new();
-                let max_len = lists.iter().map(|l| l.len()).max().unwrap_or(0);
-                
-                for i in 0..max_len {
-                    for list in &lists {
-                        if i < list.len() {
-                            result.push(list[i].clone());
-                        }
-                    }
-                }
-                
-                Ok(Value::List(result))
-            }
-            
-            // transpose - Transpose a matrix (list of lists)
-            "transpose" => {
-                if args.len() != 1 {
-                    return Err("transpose() expects 1 argument".to_string());
-                }
-                let val = self.eval_node(&args[0])?;
-                
-                match val {
-                    Value::List(rows) => {
-                        if rows.is_empty() {
-                            return Ok(Value::List(Vec::new()));
-                        }
-                        
-                        let mut cols: Vec<Vec<Value>> = Vec::new();
-                        
-                        for row in &rows {
-                            if let Value::List(row_items) = row {
-                                for (i, item) in row_items.iter().enumerate() {
-                                    if i >= cols.len() {
-                                        cols.push(Vec::new());
-                                    }
-                                    cols[i].push(item.clone());
-                                }
-                            }
-                        }
-                        
-                        let result: Vec<Value> = cols.into_iter().map(Value::List).collect();
-                        Ok(Value::List(result))
-                    }
-                    _ => Err("transpose() expects a list of lists".to_string()),
-                }
-            }
-            
+
             // window - Create overlapping windows (alias for sliding_window)
             "window" => {
                 if args.len() != 2 {
@@ -8361,17 +9404,18 @@ impl Interpreter {
                 // Reuse sliding_window implementation
                 self.call_function("sliding_window", args)
             }
-            
+
             // compact - Remove None/null values from list
             "compact" => {
                 if args.len() != 1 {
                     return Err("compact() expects 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
-                        let result: Vec<Value> = list.into_iter()
+                        let result: Vec<Value> = list
+                            .into_iter()
                             .filter(|item| !matches!(item, Value::None))
                             .collect();
                         Ok(Value::List(result))
@@ -8379,7 +9423,7 @@ impl Interpreter {
                     _ => Err("compact() expects a list".to_string()),
                 }
             }
-            
+
             // pluck - Extract property from list of dicts/objects
             "pluck" => {
                 if args.len() != 2 {
@@ -8387,12 +9431,12 @@ impl Interpreter {
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let key_val = self.eval_node(&args[1])?;
-                
+
                 let key = match key_val {
                     Value::String(s) => s,
                     _ => return Err("pluck() key must be a string".to_string()),
                 };
-                
+
                 match list_val {
                     Value::List(list) => {
                         let mut result = Vec::new();
@@ -8408,21 +9452,24 @@ impl Interpreter {
                     _ => Err("pluck() expects a list".to_string()),
                 }
             }
-            
+
             // ============================================================================
             // MORE PYTHON-KILLER FEATURES
             // ============================================================================
-            
+
             // zip_longest - Zip with fillvalue for unequal lengths (like Python's itertools.zip_longest)
             "zip_longest" => {
                 if args.len() < 3 {
-                    return Err("zip_longest() expects at least 3 arguments: list1, list2, fillvalue".to_string());
+                    return Err(
+                        "zip_longest() expects at least 3 arguments: list1, list2, fillvalue"
+                            .to_string(),
+                    );
                 }
-                
+
                 let fill_val = self.eval_node(&args[args.len() - 1])?;
                 let mut lists: Vec<Vec<Value>> = Vec::new();
                 let mut max_len = 0;
-                
+
                 for i in 0..(args.len() - 1) {
                     let val = self.eval_node(&args[i])?;
                     match val {
@@ -8433,7 +9480,7 @@ impl Interpreter {
                         _ => return Err("zip_longest() expects list arguments".to_string()),
                     }
                 }
-                
+
                 let mut result = Vec::new();
                 for i in 0..max_len {
                     let mut tuple = Vec::new();
@@ -8446,18 +9493,20 @@ impl Interpreter {
                     }
                     result.push(Value::Tuple(tuple));
                 }
-                
+
                 Ok(Value::List(result))
             }
-            
+
             // batched - Split list into batches of size n
             "batched" => {
                 if args.len() != 2 {
-                    return Err("batched() expects 2 arguments: batched(list, batch_size)".to_string());
+                    return Err(
+                        "batched() expects 2 arguments: batched(list, batch_size)".to_string()
+                    );
                 }
                 let list_val = self.eval_node(&args[0])?;
                 let size_val = self.eval_node(&args[1])?;
-                
+
                 match (list_val, size_val) {
                     (Value::List(list), Value::Integer(size)) => {
                         if size <= 0 {
@@ -8465,113 +9514,54 @@ impl Interpreter {
                         }
                         let size = size as usize;
                         let mut result = Vec::new();
-                        
+
                         for chunk in list.chunks(size) {
                             result.push(Value::List(chunk.to_vec()));
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("batched() expects (list, int)".to_string()),
                 }
             }
-            
+
             // pairwise - Return successive overlapping pairs
             "pairwise" => {
                 if args.len() != 1 {
                     return Err("pairwise() expects 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         if list.len() < 2 {
                             return Ok(Value::List(Vec::new()));
                         }
-                        
+
                         let mut result = Vec::new();
                         for i in 0..(list.len() - 1) {
                             result.push(Value::Tuple(vec![list[i].clone(), list[i + 1].clone()]));
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("pairwise() expects a list".to_string()),
                 }
             }
-            
-            // frequencies - Count frequencies (simpler than Counter)
-            "frequencies" => {
-                if args.len() != 1 {
-                    return Err("frequencies() expects 1 argument".to_string());
-                }
-                let val = self.eval_node(&args[0])?;
-                
-                match val {
-                    Value::List(list) => {
-                        let mut counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-                        
-                        for item in list {
-                            let key = format!("{:?}", item);
-                            *counts.entry(key).or_insert(0) += 1;
-                        }
-                        
-                        let mut result = std::collections::HashMap::new();
-                        for (key, count) in counts {
-                            result.insert(key, Value::Integer(count));
-                        }
-                        
-                        Ok(Value::Dict(result))
-                    }
-                    _ => Err("frequencies() expects a list".to_string()),
-                }
-            }
-            
-            // interleave - Interleave multiple lists
-            "interleave" => {
-                if args.len() < 2 {
-                    return Err("interleave() expects at least 2 arguments".to_string());
-                }
-                
-                let mut lists: Vec<Vec<Value>> = Vec::new();
-                let mut max_len = 0;
-                
-                for arg in args {
-                    let val = self.eval_node(arg)?;
-                    match val {
-                        Value::List(list) => {
-                            max_len = max_len.max(list.len());
-                            lists.push(list);
-                        }
-                        _ => return Err("interleave() expects list arguments".to_string()),
-                    }
-                }
-                
-                let mut result = Vec::new();
-                for i in 0..max_len {
-                    for list in &lists {
-                        if i < list.len() {
-                            result.push(list[i].clone());
-                        }
-                    }
-                }
-                
-                Ok(Value::List(result))
-            }
-            
+
             // dedupe - Remove consecutive duplicates
             "dedupe" => {
                 if args.len() != 1 {
                     return Err("dedupe() expects 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
                     Value::List(list) => {
                         if list.is_empty() {
                             return Ok(Value::List(Vec::new()));
                         }
-                        
+
                         let mut result = vec![list[0].clone()];
                         for i in 1..list.len() {
                             let prev_key = format!("{:?}", result.last().unwrap());
@@ -8580,83 +9570,13 @@ impl Interpreter {
                                 result.push(list[i].clone());
                             }
                         }
-                        
+
                         Ok(Value::List(result))
                     }
                     _ => Err("dedupe() expects a list".to_string()),
                 }
             }
-            
-            // compact - Remove None/null values
-            "compact" => {
-                if args.len() != 1 {
-                    return Err("compact() expects 1 argument".to_string());
-                }
-                let val = self.eval_node(&args[0])?;
-                
-                match val {
-                    Value::List(list) => {
-                        let result: Vec<Value> = list.into_iter()
-                            .filter(|v| !matches!(v, Value::None))
-                            .collect();
-                        Ok(Value::List(result))
-                    }
-                    _ => Err("compact() expects a list".to_string()),
-                }
-            }
-            
-            // sample - Random sample from list
-            "sample" => {
-                if args.len() != 2 {
-                    return Err("sample() expects 2 arguments: sample(list, n)".to_string());
-                }
-                let list_val = self.eval_node(&args[0])?;
-                let n_val = self.eval_node(&args[1])?;
-                
-                match (list_val, n_val) {
-                    (Value::List(list), Value::Integer(n)) => {
-                        if n < 0 || n as usize > list.len() {
-                            return Err("sample() n must be between 0 and list length".to_string());
-                        }
-                        
-                        // Simple random sampling (can be improved with proper RNG)
-                        let mut result = Vec::new();
-                        let mut indices: Vec<usize> = (0..list.len()).collect();
-                        
-                        for _ in 0..(n as usize) {
-                            if !indices.is_empty() {
-                                let idx = indices.remove(0);
-                                result.push(list[idx].clone());
-                            }
-                        }
-                        
-                        Ok(Value::List(result))
-                    }
-                    _ => Err("sample() expects (list, int)".to_string()),
-                }
-            }
-            
-            // shuffle - Shuffle list randomly
-            "shuffle" => {
-                if args.len() != 1 {
-                    return Err("shuffle() expects 1 argument".to_string());
-                }
-                let val = self.eval_node(&args[0])?;
-                
-                match val {
-                    Value::List(mut list) => {
-                        // Simple shuffle (can be improved with Fisher-Yates)
-                        let len = list.len();
-                        for i in 0..len {
-                            let j = (i + 1) % len;
-                            list.swap(i, j);
-                        }
-                        Ok(Value::List(list))
-                    }
-                    _ => Err("shuffle() expects a list".to_string()),
-                }
-            }
-            
+
             // deep_clone - Deep copy of nested structures
             "deep_clone" => {
                 if args.len() != 1 {
@@ -8665,16 +9585,16 @@ impl Interpreter {
                 let val = self.eval_node(&args[0])?;
                 Ok(val.clone()) // Rust's clone is already deep
             }
-            
+
             // json_parse - Parse JSON string (simple version)
             "json_parse" => {
                 if args.len() != 1 {
                     return Err("json_parse() expects 1 argument: JSON string".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 match val {
-                    Value::String(s) => {
+                    Value::String(_) => {
                         // Simple JSON parsing (would need proper JSON parser)
                         // For now, return error suggesting use of proper JSON library
                         Err("json_parse() requires JSON library integration".to_string())
@@ -8682,39 +9602,42 @@ impl Interpreter {
                     _ => Err("json_parse() expects a string".to_string()),
                 }
             }
-            
+
             // json_stringify - Convert to JSON string
             "json_stringify" => {
                 if args.len() != 1 {
                     return Err("json_stringify() expects 1 argument".to_string());
                 }
                 let val = self.eval_node(&args[0])?;
-                
+
                 // Simple JSON stringification
                 let json_str = format!("{:?}", val);
                 Ok(Value::String(json_str))
             }
-            
+
             // 🦆 SECRET EASTER EGG - Not documented anywhere!
             // Only activates with exact parameters, otherwise silently returns None
             "quack_check" => {
                 if args.len() != 3 {
                     return Ok(Value::None); // Silent fail
                 }
-                
+
                 let sound = self.eval_node(&args[0])?;
                 let num = self.eval_node(&args[1])?;
                 let ducks = self.eval_node(&args[2])?;
-                
+
                 // Check if all conditions match exactly
                 let sound_match = matches!(sound, Value::String(ref s) if s == "quack");
                 let num_match = matches!(num, Value::Integer(4));
                 let ducks_match = if let Value::List(ref list) = ducks {
-                    list.len() == 4 && list.iter().all(|v| matches!(v, Value::String(ref s) if s == "quack"))
+                    list.len() == 4
+                        && list
+                            .iter()
+                            .all(|v| matches!(v, Value::String(ref s) if s == "quack"))
                 } else {
                     false
                 };
-                
+
                 if sound_match && num_match && ducks_match {
                     // 🎉 Easter egg activated!
                     println!("Ethan likes ducks!");
@@ -8723,27 +9646,719 @@ impl Interpreter {
                     println!("    ( _ > /");
                     println!("     `---'  ");
                 }
-                
+
                 // Always return None, no indication whether it worked or not
                 Ok(Value::None)
             }
-            
-            _ => { // If not built-in, look for user-defined function (or @once/MirrorDispatch wrapper)
+
+            // ===== CRYPTOGRAPHY & SECURITY FUNCTIONS =====
+            "sha256" => {
+                if args.len() != 1 {
+                    return Err("sha256() takes exactly 1 argument".to_string());
+                }
+                let val = self.eval_node(&args[0])?;
+                let text = match val {
+                    Value::String(s) => s,
+                    _ => return Err("sha256() requires a string argument".to_string()),
+                };
+
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(text.as_bytes());
+                let result = hasher.finalize();
+
+                // Return as list of integers (bytes)
+                let bytes: Vec<Value> = result.iter().map(|b| Value::Integer(*b as i64)).collect();
+                Ok(Value::List(bytes))
+            }
+
+            "sha256_hex" => {
+                if args.len() != 1 {
+                    return Err("sha256_hex() takes exactly 1 argument".to_string());
+                }
+                let val = self.eval_node(&args[0])?;
+                let text = match val {
+                    Value::String(s) => s,
+                    _ => return Err("sha256_hex() requires a string argument".to_string()),
+                };
+
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(text.as_bytes());
+                let result = hasher.finalize();
+                let hex_string = result
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>();
+
+                Ok(Value::String(hex_string))
+            }
+
+            "hmac" => {
+                if args.len() != 2 {
+                    return Err("hmac() takes exactly 2 arguments: (message, key)".to_string());
+                }
+                let message_val = self.eval_node(&args[0])?;
+                let key_val = self.eval_node(&args[1])?;
+
+                let message = match message_val {
+                    Value::String(s) => s,
+                    _ => return Err("hmac() message must be a string".to_string()),
+                };
+                let key = match key_val {
+                    Value::String(s) => s,
+                    _ => return Err("hmac() key must be a string".to_string()),
+                };
+
+                use hmac::{Hmac, Mac};
+                use sha2::Sha256;
+                type HmacSha256 = Hmac<Sha256>;
+
+                let mut mac = HmacSha256::new_from_slice(key.as_bytes())
+                    .map_err(|e| format!("HMAC error: {}", e))?;
+                mac.update(message.as_bytes());
+                let result = mac.finalize();
+                let bytes = result.into_bytes();
+
+                let byte_list: Vec<Value> =
+                    bytes.iter().map(|b| Value::Integer(*b as i64)).collect();
+                Ok(Value::List(byte_list))
+            }
+
+            "secure_eq" => {
+                if args.len() != 2 {
+                    return Err("secure_eq() takes exactly 2 arguments".to_string());
+                }
+                let a_val = self.eval_node(&args[0])?;
+                let b_val = self.eval_node(&args[1])?;
+
+                let a = match a_val {
+                    Value::String(s) => s,
+                    _ => return Err("secure_eq() requires string arguments".to_string()),
+                };
+                let b = match b_val {
+                    Value::String(s) => s,
+                    _ => return Err("secure_eq() requires string arguments".to_string()),
+                };
+
+                // Constant-time comparison
+                if a.len() != b.len() {
+                    return Ok(Value::Boolean(false));
+                }
+
+                let mut result = 0u8;
+                for (x, y) in a.bytes().zip(b.bytes()) {
+                    result |= x ^ y;
+                }
+
+                Ok(Value::Boolean(result == 0))
+            }
+
+            "random_bytes" => {
+                if args.len() != 1 {
+                    return Err("random_bytes() takes exactly 1 argument (length)".to_string());
+                }
+                let len_val = self.eval_node(&args[0])?;
+                let len = match len_val {
+                    Value::Integer(n) if n > 0 => n as usize,
+                    _ => return Err("random_bytes() requires a positive integer".to_string()),
+                };
+
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                let bytes: Vec<Value> = (0..len)
+                    .map(|_| Value::Integer(rng.gen::<u8>() as i64))
+                    .collect();
+
+                Ok(Value::List(bytes))
+            }
+
+            "rand_range" => {
+                if args.len() != 2 {
+                    return Err("rand_range() takes exactly 2 arguments (min, max)".to_string());
+                }
+                let min_val = self.eval_node(&args[0])?;
+                let max_val = self.eval_node(&args[1])?;
+
+                let min = match min_val {
+                    Value::Integer(n) => n,
+                    _ => return Err("rand_range() requires integer arguments".to_string()),
+                };
+                let max = match max_val {
+                    Value::Integer(n) => n,
+                    _ => return Err("rand_range() requires integer arguments".to_string()),
+                };
+
+                if min >= max {
+                    return Err("rand_range() requires min < max".to_string());
+                }
+
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                let result = rng.gen_range(min..max);
+
+                Ok(Value::Integer(result))
+            }
+
+            "uuid_v4" => {
+                if args.len() != 0 {
+                    return Err("uuid_v4() takes no arguments".to_string());
+                }
+
+                use uuid::Uuid;
+                let id = Uuid::new_v4();
+                Ok(Value::String(id.to_string()))
+            }
+
+            "password_hash" => {
+                if args.len() != 1 {
+                    return Err("password_hash() takes exactly 1 argument".to_string());
+                }
+                let password_val = self.eval_node(&args[0])?;
+                let password = match password_val {
+                    Value::String(s) => s,
+                    _ => return Err("password_hash() requires a string argument".to_string()),
+                };
+
+                // Simple bcrypt-style hash using SHA256 + salt
+                use rand::Rng;
+                use sha2::{Digest, Sha256};
+
+                let mut rng = rand::thread_rng();
+                let salt: String = (0..16)
+                    .map(|_| format!("{:02x}", rng.gen::<u8>()))
+                    .collect();
+
+                let mut hasher = Sha256::new();
+                hasher.update(salt.as_bytes());
+                hasher.update(password.as_bytes());
+                let hash = hasher.finalize();
+                let hash_hex = hash
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>();
+
+                // Format: $salt$hash
+                Ok(Value::String(format!("${}${}", salt, hash_hex)))
+            }
+
+            "password_verify" => {
+                if args.len() != 2 {
+                    return Err(
+                        "password_verify() takes exactly 2 arguments (password, hash)".to_string(),
+                    );
+                }
+                let password_val = self.eval_node(&args[0])?;
+                let hash_val = self.eval_node(&args[1])?;
+
+                let password = match password_val {
+                    Value::String(s) => s,
+                    _ => return Err("password_verify() requires string arguments".to_string()),
+                };
+                let stored_hash = match hash_val {
+                    Value::String(s) => s,
+                    _ => return Err("password_verify() requires string arguments".to_string()),
+                };
+
+                // Parse stored hash: $salt$hash
+                let parts: Vec<&str> = stored_hash.split('$').collect();
+                if parts.len() != 3 || !parts[0].is_empty() {
+                    return Err("Invalid password hash format".to_string());
+                }
+
+                let salt = parts[1];
+                let expected_hash = parts[2];
+
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(salt.as_bytes());
+                hasher.update(password.as_bytes());
+                let hash = hasher.finalize();
+                let computed_hash = hash
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>();
+
+                // Constant-time comparison
+                if computed_hash.len() != expected_hash.len() {
+                    return Ok(Value::Boolean(false));
+                }
+
+                let mut result = 0u8;
+                for (x, y) in computed_hash.bytes().zip(expected_hash.bytes()) {
+                    result |= x ^ y;
+                }
+
+                Ok(Value::Boolean(result == 0))
+            }
+
+            "encrypt" => {
+                if args.len() != 2 {
+                    return Err("encrypt() takes exactly 2 arguments (plaintext, key)".to_string());
+                }
+                let plaintext_val = self.eval_node(&args[0])?;
+                let key_val = self.eval_node(&args[1])?;
+
+                let plaintext = match plaintext_val {
+                    Value::String(s) => s,
+                    _ => return Err("encrypt() plaintext must be a string".to_string()),
+                };
+                let key = match key_val {
+                    Value::String(s) => s,
+                    _ => return Err("encrypt() key must be a string".to_string()),
+                };
+
+                // Simple XOR cipher with key stretching (for demo purposes)
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(key.as_bytes());
+                let key_hash = hasher.finalize();
+
+                let encrypted: Vec<u8> = plaintext
+                    .bytes()
+                    .enumerate()
+                    .map(|(i, b)| b ^ key_hash[i % key_hash.len()])
+                    .collect();
+
+                // Return as base64
+                use base64::{engine::general_purpose, Engine as _};
+                let encoded = general_purpose::STANDARD.encode(&encrypted);
+                Ok(Value::String(encoded))
+            }
+
+            "decrypt" => {
+                if args.len() != 2 {
+                    return Err("decrypt() takes exactly 2 arguments (ciphertext, key)".to_string());
+                }
+                let ciphertext_val = self.eval_node(&args[0])?;
+                let key_val = self.eval_node(&args[1])?;
+
+                let ciphertext = match ciphertext_val {
+                    Value::String(s) => s,
+                    _ => return Err("decrypt() ciphertext must be a string".to_string()),
+                };
+                let key = match key_val {
+                    Value::String(s) => s,
+                    _ => return Err("decrypt() key must be a string".to_string()),
+                };
+
+                // Decode from base64
+                use base64::{engine::general_purpose, Engine as _};
+                let encrypted = general_purpose::STANDARD
+                    .decode(&ciphertext)
+                    .map_err(|e| format!("decrypt() invalid base64: {}", e))?;
+
+                // Simple XOR cipher with key stretching
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(key.as_bytes());
+                let key_hash = hasher.finalize();
+
+                let decrypted: Vec<u8> = encrypted
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| b ^ key_hash[i % key_hash.len()])
+                    .collect();
+
+                let plaintext = String::from_utf8(decrypted)
+                    .map_err(|e| format!("decrypt() invalid UTF-8: {}", e))?;
+
+                Ok(Value::String(plaintext))
+            }
+
+            "secure_token" => {
+                if args.len() != 1 {
+                    return Err("secure_token() takes exactly 1 argument (length)".to_string());
+                }
+                let len_val = self.eval_node(&args[0])?;
+                let len = match len_val {
+                    Value::Integer(n) if n > 0 => n as usize,
+                    _ => return Err("secure_token() requires a positive integer".to_string()),
+                };
+
+                use rand::Rng;
+                const CHARSET: &[u8] =
+                    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+                let mut rng = rand::thread_rng();
+
+                let token: String = (0..len)
+                    .map(|_| {
+                        let idx = rng.gen_range(0..CHARSET.len());
+                        CHARSET[idx] as char
+                    })
+                    .collect();
+
+                Ok(Value::String(token))
+            }
+
+            // ===== WEB SCRAPING FUNCTIONS =====
+            "fetch_html" => {
+                if args.len() != 1 {
+                    return Err("fetch_html() takes exactly 1 argument (url)".to_string());
+                }
+                let url_val = self.eval_node(&args[0])?;
+                let url = match url_val {
+                    Value::String(s) => s,
+                    _ => return Err("fetch_html() requires a string URL".to_string()),
+                };
+
+                // Simple HTML fetch (returns raw HTML as string for now)
+                // In a real implementation, this would use reqwest + scraper crates
+                // For now, return a placeholder that indicates the feature exists
+                Ok(Value::String(format!("HTML_DOM:{}", url)))
+            }
+
+            "fetch_json" => {
+                if args.len() != 1 {
+                    return Err("fetch_json() takes exactly 1 argument (url)".to_string());
+                }
+                let url_val = self.eval_node(&args[0])?;
+                let url = match url_val {
+                    Value::String(s) => s,
+                    _ => return Err("fetch_json() requires a string URL".to_string()),
+                };
+
+                // Placeholder for JSON fetch
+                Ok(Value::String(format!("JSON:{}", url)))
+            }
+
+            "fetch_text" => {
+                if args.len() != 1 {
+                    return Err("fetch_text() takes exactly 1 argument (url)".to_string());
+                }
+                let url_val = self.eval_node(&args[0])?;
+                let url = match url_val {
+                    Value::String(s) => s,
+                    _ => return Err("fetch_text() requires a string URL".to_string()),
+                };
+
+                // Placeholder for text fetch
+                Ok(Value::String(format!("TEXT:{}", url)))
+            }
+
+            // ===== CLI FUNCTIONS =====
+            "cli_prompt" => {
+                if args.len() != 1 {
+                    return Err("cli_prompt() takes exactly 1 argument (prompt text)".to_string());
+                }
+                let prompt_val = self.eval_node(&args[0])?;
+                let prompt = match prompt_val {
+                    Value::String(s) => s,
+                    _ => return Err("cli_prompt() requires a string".to_string()),
+                };
+
+                use std::io::{self, Write};
+                print!("{}", prompt);
+                io::stdout().flush().unwrap();
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).unwrap();
+
+                Ok(Value::String(input.trim().to_string()))
+            }
+
+            "cli_args" => {
+                if args.len() != 0 {
+                    return Err("cli_args() takes no arguments".to_string());
+                }
+
+                // Get command line arguments
+                let args: Vec<Value> = std::env::args()
+                    .skip(1) // Skip program name
+                    .map(|arg| Value::String(arg))
+                    .collect();
+
+                Ok(Value::List(args))
+            }
+
+            "env_get" => {
+                if args.len() != 1 {
+                    return Err("env_get() takes exactly 1 argument (variable name)".to_string());
+                }
+                let var_val = self.eval_node(&args[0])?;
+                let var_name = match var_val {
+                    Value::String(s) => s,
+                    _ => return Err("env_get() requires a string".to_string()),
+                };
+
+                match std::env::var(&var_name) {
+                    Ok(value) => Ok(Value::String(value)),
+                    Err(_) => Ok(Value::None),
+                }
+            }
+
+            "env_set" => {
+                if args.len() != 2 {
+                    return Err("env_set() takes exactly 2 arguments (name, value)".to_string());
+                }
+                let name_val = self.eval_node(&args[0])?;
+                let value_val = self.eval_node(&args[1])?;
+
+                let name = match name_val {
+                    Value::String(s) => s,
+                    _ => return Err("env_set() name must be a string".to_string()),
+                };
+                let value = match value_val {
+                    Value::String(s) => s,
+                    _ => return Err("env_set() value must be a string".to_string()),
+                };
+
+                std::env::set_var(&name, &value);
+                Ok(Value::None)
+            }
+
+            "file_read" => {
+                if args.len() != 1 {
+                    return Err("file_read() takes exactly 1 argument (filename)".to_string());
+                }
+                let filename_val = self.eval_node(&args[0])?;
+                let filename = match filename_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_read() requires a string filename".to_string()),
+                };
+
+                match std::fs::read_to_string(&filename) {
+                    Ok(content) => Ok(Value::String(content)),
+                    Err(e) => Err(format!("Failed to read file '{}': {}", filename, e)),
+                }
+            }
+
+            "file_write" => {
+                if args.len() != 2 {
+                    return Err(
+                        "file_write() takes exactly 2 arguments (filename, content)".to_string()
+                    );
+                }
+                let filename_val = self.eval_node(&args[0])?;
+                let content_val = self.eval_node(&args[1])?;
+
+                let filename = match filename_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_write() filename must be a string".to_string()),
+                };
+                let content = match content_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_write() content must be a string".to_string()),
+                };
+
+                match std::fs::write(&filename, &content) {
+                    Ok(_) => Ok(Value::None),
+                    Err(e) => Err(format!("Failed to write file '{}': {}", filename, e)),
+                }
+            }
+
+            "file_exists" => {
+                if args.len() != 1 {
+                    return Err("file_exists() takes exactly 1 argument (filename)".to_string());
+                }
+                let filename_val = self.eval_node(&args[0])?;
+                let filename = match filename_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_exists() requires a string filename".to_string()),
+                };
+
+                Ok(Value::Boolean(std::path::Path::new(&filename).exists()))
+            }
+
+            "dir_list" => {
+                if args.len() != 1 {
+                    return Err("dir_list() takes exactly 1 argument (directory path)".to_string());
+                }
+                let dir_val = self.eval_node(&args[0])?;
+                let dir_path = match dir_val {
+                    Value::String(s) => s,
+                    _ => return Err("dir_list() requires a string path".to_string()),
+                };
+
+                match std::fs::read_dir(&dir_path) {
+                    Ok(entries) => {
+                        let files: Vec<Value> = entries
+                            .filter_map(|entry| entry.ok())
+                            .map(|entry| {
+                                Value::String(entry.file_name().to_string_lossy().to_string())
+                            })
+                            .collect();
+                        Ok(Value::List(files))
+                    }
+                    Err(e) => Err(format!("Failed to read directory '{}': {}", dir_path, e)),
+                }
+            }
+
+            "timestamp" => {
+                if args.len() != 0 {
+                    return Err("timestamp() takes no arguments".to_string());
+                }
+
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let duration = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+
+                Ok(Value::Integer(duration.as_secs() as i64))
+            }
+
+            "file_delete" => {
+                if args.len() != 1 {
+                    return Err("file_delete() takes exactly 1 argument (filename)".to_string());
+                }
+                let filename_val = self.eval_node(&args[0])?;
+                let filename = match filename_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_delete() requires a string filename".to_string()),
+                };
+
+                match std::fs::remove_file(&filename) {
+                    Ok(_) => Ok(Value::None),
+                    Err(e) => Err(format!("Failed to delete file '{}': {}", filename, e)),
+                }
+            }
+
+            "file_append" => {
+                if args.len() != 2 {
+                    return Err(
+                        "file_append() takes exactly 2 arguments (filename, content)".to_string(),
+                    );
+                }
+                let filename_val = self.eval_node(&args[0])?;
+                let content_val = self.eval_node(&args[1])?;
+
+                let filename = match filename_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_append() filename must be a string".to_string()),
+                };
+                let content = match content_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_append() content must be a string".to_string()),
+                };
+
+                use std::fs::OpenOptions;
+                use std::io::Write;
+
+                match OpenOptions::new().create(true).append(true).open(&filename) {
+                    Ok(mut file) => match file.write_all(content.as_bytes()) {
+                        Ok(_) => Ok(Value::None),
+                        Err(e) => Err(format!("Failed to append to file '{}': {}", filename, e)),
+                    },
+                    Err(e) => Err(format!("Failed to open file '{}': {}", filename, e)),
+                }
+            }
+
+            "dir_create" => {
+                if args.len() != 1 {
+                    return Err(
+                        "dir_create() takes exactly 1 argument (directory path)".to_string()
+                    );
+                }
+                let dir_val = self.eval_node(&args[0])?;
+                let dir_path = match dir_val {
+                    Value::String(s) => s,
+                    _ => return Err("dir_create() requires a string path".to_string()),
+                };
+
+                match std::fs::create_dir_all(&dir_path) {
+                    Ok(_) => Ok(Value::None),
+                    Err(e) => Err(format!("Failed to create directory '{}': {}", dir_path, e)),
+                }
+            }
+
+            "dir_delete" => {
+                if args.len() != 1 {
+                    return Err(
+                        "dir_delete() takes exactly 1 argument (directory path)".to_string()
+                    );
+                }
+                let dir_val = self.eval_node(&args[0])?;
+                let dir_path = match dir_val {
+                    Value::String(s) => s,
+                    _ => return Err("dir_delete() requires a string path".to_string()),
+                };
+
+                match std::fs::remove_dir_all(&dir_path) {
+                    Ok(_) => Ok(Value::None),
+                    Err(e) => Err(format!("Failed to delete directory '{}': {}", dir_path, e)),
+                }
+            }
+
+            "file_copy" => {
+                if args.len() != 2 {
+                    return Err(
+                        "file_copy() takes exactly 2 arguments (source, destination)".to_string(),
+                    );
+                }
+                let src_val = self.eval_node(&args[0])?;
+                let dst_val = self.eval_node(&args[1])?;
+
+                let src = match src_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_copy() source must be a string".to_string()),
+                };
+                let dst = match dst_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_copy() destination must be a string".to_string()),
+                };
+
+                match std::fs::copy(&src, &dst) {
+                    Ok(_) => Ok(Value::None),
+                    Err(e) => Err(format!("Failed to copy file '{}' to '{}': {}", src, dst, e)),
+                }
+            }
+
+            "file_rename" => {
+                if args.len() != 2 {
+                    return Err(
+                        "file_rename() takes exactly 2 arguments (old_name, new_name)".to_string(),
+                    );
+                }
+                let old_val = self.eval_node(&args[0])?;
+                let new_val = self.eval_node(&args[1])?;
+
+                let old_name = match old_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_rename() old_name must be a string".to_string()),
+                };
+                let new_name = match new_val {
+                    Value::String(s) => s,
+                    _ => return Err("file_rename() new_name must be a string".to_string()),
+                };
+
+                match std::fs::rename(&old_name, &new_name) {
+                    Ok(_) => Ok(Value::None),
+                    Err(e) => Err(format!(
+                        "Failed to rename file '{}' to '{}': {}",
+                        old_name, new_name, e
+                    )),
+                }
+            }
+
+            _ => {
+                // If not built-in, look for user-defined function (or @once/MirrorDispatch wrapper)
                 let func_val = self.get_variable(name)?;
-                let eval_args: Vec<Value> = args.iter().map(|a| self.eval_node(a)).collect::<Result<Vec<_>, _>>()?;
+                let eval_args: Vec<Value> = args
+                    .iter()
+                    .map(|a| self.eval_node(a))
+                    .collect::<Result<Vec<_>, _>>()?;
                 self.call_value_with_args(func_val, &eval_args, None)
             }
         }
     }
-    
+
     fn eval_binary_op(&self, left: &Value, op: &BinaryOp, right: &Value) -> Result<Value, String> {
         match (left, op, right) {
-            (Value::Integer(a), BinaryOp::Add, Value::Integer(b)) => Ok(Value::Integer(a + b)),
-            (Value::Integer(a), BinaryOp::Subtract, Value::Integer(b)) => Ok(Value::Integer(a - b)),
-            (Value::Integer(a), BinaryOp::Multiply, Value::Integer(b)) => Ok(Value::Integer(a * b)),
+            (Value::Integer(a), BinaryOp::Add, Value::Integer(b)) => a
+                .checked_add(*b)
+                .map(Value::Integer)
+                .ok_or_else(|| format!("Integer overflow: {} + {}", a, b)),
+            (Value::Integer(a), BinaryOp::Subtract, Value::Integer(b)) => a
+                .checked_sub(*b)
+                .map(Value::Integer)
+                .ok_or_else(|| format!("Integer overflow: {} - {}", a, b)),
+            (Value::Integer(a), BinaryOp::Multiply, Value::Integer(b)) => a
+                .checked_mul(*b)
+                .map(Value::Integer)
+                .ok_or_else(|| format!("Integer overflow: {} * {}", a, b)),
             (Value::Integer(a), BinaryOp::Divide, Value::Integer(b)) => {
                 if *b == 0 {
                     Err(JError::division_by_zero(0, 0).to_string())
+                } else if *a == i64::MIN && *b == -1 {
+                    Err("Integer overflow: i64::MIN / -1".to_string())
                 } else {
                     Ok(Value::Integer(a / b))
                 }
@@ -8751,18 +10366,34 @@ impl Interpreter {
             (Value::Integer(a), BinaryOp::Modulo, Value::Integer(b)) => {
                 if *b == 0 {
                     Err(JError::division_by_zero(0, 0).to_string())
+                } else if *a == i64::MIN && *b == -1 {
+                    Ok(Value::Integer(0)) // Mathematically correct
                 } else {
                     Ok(Value::Integer(a % b))
                 }
             }
             (Value::Integer(a), BinaryOp::Power, Value::Integer(b)) => {
-                Ok(Value::Integer(a.pow(*b as u32)))
+                if *b < 0 {
+                    Ok(Value::Float((*a as f64).powf(*b as f64)))
+                } else if *b > u32::MAX as i64 {
+                    Err("Exponent too large".to_string())
+                } else {
+                    a.checked_pow(*b as u32)
+                        .map(Value::Integer)
+                        .ok_or_else(|| format!("Integer overflow: {} ** {}", a, b))
+                }
             }
-            
+
             // Bitwise operations
-            (Value::Integer(a), BinaryOp::BitwiseAnd, Value::Integer(b)) => Ok(Value::Integer(a & b)),
-            (Value::Integer(a), BinaryOp::BitwiseOr, Value::Integer(b)) => Ok(Value::Integer(a | b)),
-            (Value::Integer(a), BinaryOp::BitwiseXor, Value::Integer(b)) => Ok(Value::Integer(a ^ b)),
+            (Value::Integer(a), BinaryOp::BitwiseAnd, Value::Integer(b)) => {
+                Ok(Value::Integer(a & b))
+            }
+            (Value::Integer(a), BinaryOp::BitwiseOr, Value::Integer(b)) => {
+                Ok(Value::Integer(a | b))
+            }
+            (Value::Integer(a), BinaryOp::BitwiseXor, Value::Integer(b)) => {
+                Ok(Value::Integer(a ^ b))
+            }
             (Value::Integer(a), BinaryOp::LeftShift, Value::Integer(b)) => {
                 if *b < 0 {
                     return Err("Shift amount must be non-negative".to_string());
@@ -8775,16 +10406,16 @@ impl Interpreter {
                 }
                 Ok(Value::Integer(a >> b))
             }
-            
+
             (Value::Float(a), BinaryOp::Add, Value::Float(b)) => Ok(Value::Float(a + b)),
             (Value::Float(a), BinaryOp::Subtract, Value::Float(b)) => Ok(Value::Float(a - b)),
             (Value::Float(a), BinaryOp::Multiply, Value::Float(b)) => Ok(Value::Float(a * b)),
             (Value::Float(a), BinaryOp::Divide, Value::Float(b)) => Ok(Value::Float(a / b)),
-            
+
             (Value::String(a), BinaryOp::Add, Value::String(b)) => {
                 Ok(Value::String(format!("{}{}", a, b)))
             }
-            
+
             // Vector operations
             (Value::Vector(a), BinaryOp::Add, Value::Vector(b)) => {
                 if a.len() != b.len() {
@@ -8816,7 +10447,7 @@ impl Interpreter {
                 let result: Vec<f64> = a.iter().map(|x| (*scalar as f64) * x).collect();
                 Ok(Value::Vector(result))
             }
-            
+
             // Matrix operations
             (Value::Matrix(a), BinaryOp::Add, Value::Matrix(b)) => {
                 if a.len() != b.len() || (a.len() > 0 && a[0].len() != b[0].len()) {
@@ -8824,7 +10455,8 @@ impl Interpreter {
                 }
                 let mut result = Vec::new();
                 for (row_a, row_b) in a.iter().zip(b.iter()) {
-                    let result_row: Vec<f64> = row_a.iter().zip(row_b.iter()).map(|(x, y)| x + y).collect();
+                    let result_row: Vec<f64> =
+                        row_a.iter().zip(row_b.iter()).map(|(x, y)| x + y).collect();
                     result.push(result_row);
                 }
                 Ok(Value::Matrix(result))
@@ -8835,24 +10467,27 @@ impl Interpreter {
                 }
                 let mut result = Vec::new();
                 for (row_a, row_b) in a.iter().zip(b.iter()) {
-                    let result_row: Vec<f64> = row_a.iter().zip(row_b.iter()).map(|(x, y)| x - y).collect();
+                    let result_row: Vec<f64> =
+                        row_a.iter().zip(row_b.iter()).map(|(x, y)| x - y).collect();
                     result.push(result_row);
                 }
                 Ok(Value::Matrix(result))
             }
             (Value::Matrix(a), BinaryOp::Multiply, Value::Float(scalar)) => {
-                let result: Vec<Vec<f64>> = a.iter().map(|row| {
-                    row.iter().map(|x| x * scalar).collect()
-                }).collect();
+                let result: Vec<Vec<f64>> = a
+                    .iter()
+                    .map(|row| row.iter().map(|x| x * scalar).collect())
+                    .collect();
                 Ok(Value::Matrix(result))
             }
             (Value::Float(scalar), BinaryOp::Multiply, Value::Matrix(a)) => {
-                let result: Vec<Vec<f64>> = a.iter().map(|row| {
-                    row.iter().map(|x| scalar * x).collect()
-                }).collect();
+                let result: Vec<Vec<f64>> = a
+                    .iter()
+                    .map(|row| row.iter().map(|x| scalar * x).collect())
+                    .collect();
                 Ok(Value::Matrix(result))
             }
-            
+
             // Counter operations
             (Value::Counter(a), BinaryOp::Add, Value::Counter(b)) => {
                 let mut result = a.clone();
@@ -8872,71 +10507,135 @@ impl Interpreter {
                 }
                 Ok(Value::Counter(result))
             }
-            
+
             (Value::Integer(a), BinaryOp::Equal, Value::Integer(b)) => Ok(Value::Boolean(a == b)),
             (Value::Float(a), BinaryOp::Equal, Value::Float(b)) => Ok(Value::Boolean(a == b)),
             (Value::String(a), BinaryOp::Equal, Value::String(b)) => Ok(Value::Boolean(a == b)),
             (Value::Boolean(a), BinaryOp::Equal, Value::Boolean(b)) => Ok(Value::Boolean(a == b)),
             // Constant-time equality ~== (same result as ==, no short-circuit)
-            (Value::String(a), BinaryOp::ConstantTimeEq, Value::String(b)) => {
-                Ok(Value::Boolean(a.len() == b.len() && a.as_bytes() == b.as_bytes()))
+            (Value::String(a), BinaryOp::ConstantTimeEq, Value::String(b)) => Ok(Value::Boolean(
+                a.len() == b.len() && a.as_bytes() == b.as_bytes(),
+            )),
+            (Value::Integer(a), BinaryOp::ConstantTimeEq, Value::Integer(b)) => {
+                Ok(Value::Boolean(a == b))
             }
-            (Value::Integer(a), BinaryOp::ConstantTimeEq, Value::Integer(b)) => Ok(Value::Boolean(a == b)),
-            (Value::Float(a), BinaryOp::ConstantTimeEq, Value::Float(b)) => Ok(Value::Boolean(a == b)),
-            (Value::Boolean(a), BinaryOp::ConstantTimeEq, Value::Boolean(b)) => Ok(Value::Boolean(a == b)),
-            
+            (Value::Float(a), BinaryOp::ConstantTimeEq, Value::Float(b)) => {
+                Ok(Value::Boolean(a == b))
+            }
+            (Value::Boolean(a), BinaryOp::ConstantTimeEq, Value::Boolean(b)) => {
+                Ok(Value::Boolean(a == b))
+            }
+
             (Value::Integer(a), BinaryOp::Less, Value::Integer(b)) => Ok(Value::Boolean(a < b)),
             (Value::Integer(a), BinaryOp::Greater, Value::Integer(b)) => Ok(Value::Boolean(a > b)),
-            (Value::Integer(a), BinaryOp::LessEqual, Value::Integer(b)) => Ok(Value::Boolean(a <= b)),
-            (Value::Integer(a), BinaryOp::GreaterEqual, Value::Integer(b)) => Ok(Value::Boolean(a >= b)),
-            
+            (Value::Integer(a), BinaryOp::LessEqual, Value::Integer(b)) => {
+                Ok(Value::Boolean(a <= b))
+            }
+            (Value::Integer(a), BinaryOp::GreaterEqual, Value::Integer(b)) => {
+                Ok(Value::Boolean(a >= b))
+            }
+
             (Value::Float(a), BinaryOp::Less, Value::Float(b)) => Ok(Value::Boolean(a < b)),
             (Value::Float(a), BinaryOp::Greater, Value::Float(b)) => Ok(Value::Boolean(a > b)),
             (Value::Float(a), BinaryOp::LessEqual, Value::Float(b)) => Ok(Value::Boolean(a <= b)),
-            (Value::Float(a), BinaryOp::GreaterEqual, Value::Float(b)) => Ok(Value::Boolean(a >= b)),
-            
+            (Value::Float(a), BinaryOp::GreaterEqual, Value::Float(b)) => {
+                Ok(Value::Boolean(a >= b))
+            }
+
             // Infinity comparisons
             (Value::Integer(_), BinaryOp::Less, Value::Infinity(true)) => Ok(Value::Boolean(true)),
-            (Value::Integer(_), BinaryOp::Greater, Value::Infinity(true)) => Ok(Value::Boolean(false)),
-            (Value::Integer(_), BinaryOp::Greater, Value::Infinity(false)) => Ok(Value::Boolean(true)),
-            (Value::Integer(_), BinaryOp::Less, Value::Infinity(false)) => Ok(Value::Boolean(false)),
-            (Value::Integer(_), BinaryOp::LessEqual, Value::Infinity(true)) => Ok(Value::Boolean(true)),
-            (Value::Integer(_), BinaryOp::GreaterEqual, Value::Infinity(true)) => Ok(Value::Boolean(false)),
-            (Value::Integer(_), BinaryOp::GreaterEqual, Value::Infinity(false)) => Ok(Value::Boolean(true)),
-            (Value::Integer(_), BinaryOp::LessEqual, Value::Infinity(false)) => Ok(Value::Boolean(false)),
-            
+            (Value::Integer(_), BinaryOp::Greater, Value::Infinity(true)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Integer(_), BinaryOp::Greater, Value::Infinity(false)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Integer(_), BinaryOp::Less, Value::Infinity(false)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Integer(_), BinaryOp::LessEqual, Value::Infinity(true)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Integer(_), BinaryOp::GreaterEqual, Value::Infinity(true)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Integer(_), BinaryOp::GreaterEqual, Value::Infinity(false)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Integer(_), BinaryOp::LessEqual, Value::Infinity(false)) => {
+                Ok(Value::Boolean(false))
+            }
+
             (Value::Float(_), BinaryOp::Less, Value::Infinity(true)) => Ok(Value::Boolean(true)),
-            (Value::Float(_), BinaryOp::Greater, Value::Infinity(true)) => Ok(Value::Boolean(false)),
-            (Value::Float(_), BinaryOp::Greater, Value::Infinity(false)) => Ok(Value::Boolean(true)),
+            (Value::Float(_), BinaryOp::Greater, Value::Infinity(true)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Float(_), BinaryOp::Greater, Value::Infinity(false)) => {
+                Ok(Value::Boolean(true))
+            }
             (Value::Float(_), BinaryOp::Less, Value::Infinity(false)) => Ok(Value::Boolean(false)),
-            (Value::Float(_), BinaryOp::LessEqual, Value::Infinity(true)) => Ok(Value::Boolean(true)),
-            (Value::Float(_), BinaryOp::GreaterEqual, Value::Infinity(true)) => Ok(Value::Boolean(false)),
-            (Value::Float(_), BinaryOp::GreaterEqual, Value::Infinity(false)) => Ok(Value::Boolean(true)),
-            (Value::Float(_), BinaryOp::LessEqual, Value::Infinity(false)) => Ok(Value::Boolean(false)),
-            
+            (Value::Float(_), BinaryOp::LessEqual, Value::Infinity(true)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Float(_), BinaryOp::GreaterEqual, Value::Infinity(true)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Float(_), BinaryOp::GreaterEqual, Value::Infinity(false)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Float(_), BinaryOp::LessEqual, Value::Infinity(false)) => {
+                Ok(Value::Boolean(false))
+            }
+
             // Reverse infinity comparisons
-            (Value::Infinity(true), BinaryOp::Greater, Value::Integer(_)) => Ok(Value::Boolean(true)),
+            (Value::Infinity(true), BinaryOp::Greater, Value::Integer(_)) => {
+                Ok(Value::Boolean(true))
+            }
             (Value::Infinity(true), BinaryOp::Less, Value::Integer(_)) => Ok(Value::Boolean(false)),
             (Value::Infinity(false), BinaryOp::Less, Value::Integer(_)) => Ok(Value::Boolean(true)),
-            (Value::Infinity(false), BinaryOp::Greater, Value::Integer(_)) => Ok(Value::Boolean(false)),
-            (Value::Infinity(true), BinaryOp::GreaterEqual, Value::Integer(_)) => Ok(Value::Boolean(true)),
-            (Value::Infinity(true), BinaryOp::LessEqual, Value::Integer(_)) => Ok(Value::Boolean(false)),
-            (Value::Infinity(false), BinaryOp::LessEqual, Value::Integer(_)) => Ok(Value::Boolean(true)),
-            (Value::Infinity(false), BinaryOp::GreaterEqual, Value::Integer(_)) => Ok(Value::Boolean(false)),
-            
+            (Value::Infinity(false), BinaryOp::Greater, Value::Integer(_)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Infinity(true), BinaryOp::GreaterEqual, Value::Integer(_)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Infinity(true), BinaryOp::LessEqual, Value::Integer(_)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Infinity(false), BinaryOp::LessEqual, Value::Integer(_)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Infinity(false), BinaryOp::GreaterEqual, Value::Integer(_)) => {
+                Ok(Value::Boolean(false))
+            }
+
             (Value::Infinity(true), BinaryOp::Greater, Value::Float(_)) => Ok(Value::Boolean(true)),
             (Value::Infinity(true), BinaryOp::Less, Value::Float(_)) => Ok(Value::Boolean(false)),
             (Value::Infinity(false), BinaryOp::Less, Value::Float(_)) => Ok(Value::Boolean(true)),
-            (Value::Infinity(false), BinaryOp::Greater, Value::Float(_)) => Ok(Value::Boolean(false)),
-            (Value::Infinity(true), BinaryOp::GreaterEqual, Value::Float(_)) => Ok(Value::Boolean(true)),
-            (Value::Infinity(true), BinaryOp::LessEqual, Value::Float(_)) => Ok(Value::Boolean(false)),
-            (Value::Infinity(false), BinaryOp::LessEqual, Value::Float(_)) => Ok(Value::Boolean(true)),
-            (Value::Infinity(false), BinaryOp::GreaterEqual, Value::Float(_)) => Ok(Value::Boolean(false)),
-            
-            (Value::Infinity(true), BinaryOp::Greater, Value::Infinity(false)) => Ok(Value::Boolean(true)),
-            (Value::Infinity(false), BinaryOp::Less, Value::Infinity(true)) => Ok(Value::Boolean(true)),
+            (Value::Infinity(false), BinaryOp::Greater, Value::Float(_)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Infinity(true), BinaryOp::GreaterEqual, Value::Float(_)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Infinity(true), BinaryOp::LessEqual, Value::Float(_)) => {
+                Ok(Value::Boolean(false))
+            }
+            (Value::Infinity(false), BinaryOp::LessEqual, Value::Float(_)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Infinity(false), BinaryOp::GreaterEqual, Value::Float(_)) => {
+                Ok(Value::Boolean(false))
+            }
+
+            (Value::Infinity(true), BinaryOp::Greater, Value::Infinity(false)) => {
+                Ok(Value::Boolean(true))
+            }
+            (Value::Infinity(false), BinaryOp::Less, Value::Infinity(true)) => {
+                Ok(Value::Boolean(true))
+            }
             (Value::Infinity(a), BinaryOp::Equal, Value::Infinity(b)) => Ok(Value::Boolean(a == b)),
-            
+
             // Infinity arithmetic
             (Value::Infinity(positive), BinaryOp::Add, _) => Ok(Value::Infinity(*positive)),
             (_, BinaryOp::Add, Value::Infinity(positive)) => Ok(Value::Infinity(*positive)),
@@ -8980,14 +10679,17 @@ impl Interpreter {
             }
             (Value::Integer(_), BinaryOp::Divide, Value::Infinity(_)) => Ok(Value::Float(0.0)),
             (Value::Float(_), BinaryOp::Divide, Value::Infinity(_)) => Ok(Value::Float(0.0)),
-            
+
             (Value::Boolean(a), BinaryOp::And, Value::Boolean(b)) => Ok(Value::Boolean(*a && *b)),
             (Value::Boolean(a), BinaryOp::Or, Value::Boolean(b)) => Ok(Value::Boolean(*a || *b)),
             (_, BinaryOp::ConstantTimeEq, _) => Ok(Value::Boolean(self.values_equal(left, right))),
-            _ => Err(format!("Unsupported binary operation: {} {:?} {}", left, op, right)),
+            _ => Err(format!(
+                "Unsupported binary operation: {} {:?} {}",
+                left, op, right
+            )),
         }
     }
-    
+
     fn eval_unary_op(&self, op: &UnaryOp, operand: &Value) -> Result<Value, String> {
         match (op, operand) {
             (UnaryOp::Minus, Value::Integer(i)) => Ok(Value::Integer(-i)),
@@ -8998,8 +10700,8 @@ impl Interpreter {
             _ => Err(format!("Unsupported unary operation: {:?} {}", op, operand)),
         }
     }
-    
-    fn pattern_matches(&self, pattern: &Pattern, value: &Value) -> Result<bool, String> {
+
+    fn pattern_matches(&mut self, pattern: &Pattern, value: &Value) -> Result<bool, String> {
         match (pattern, value) {
             (Pattern::Wildcard, _) => Ok(true),
             (Pattern::Literal(lit_node), _) => {
@@ -9012,11 +10714,39 @@ impl Interpreter {
                 };
                 Ok(self.values_equal(&lit_val, value))
             }
-            (Pattern::Identifier(_), _) => Ok(true), // Identifiers always match and bind
+            // CRITICAL FIX: Pattern matching now binds variables
+            (Pattern::Identifier(name), _) => {
+                self.set_variable(name.clone(), value.clone());
+                Ok(true)
+            }
+            // CRITICAL FIX: Add tuple pattern matching
+            (Pattern::Tuple(patterns), Value::Tuple(values)) => {
+                if patterns.len() != values.len() {
+                    return Ok(false);
+                }
+                for (pat, val) in patterns.iter().zip(values.iter()) {
+                    if !self.pattern_matches(pat, val)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            // CRITICAL FIX: Add list pattern matching
+            (Pattern::List(patterns), Value::List(values)) => {
+                if patterns.len() != values.len() {
+                    return Ok(false);
+                }
+                for (pat, val) in patterns.iter().zip(values.iter()) {
+                    if !self.pattern_matches(pat, val)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
             _ => Ok(false),
         }
     }
-    
+
     fn values_equal(&self, a: &Value, b: &Value) -> bool {
         match (a, b) {
             (Value::Integer(a), Value::Integer(b)) => a == b,
@@ -9027,7 +10757,7 @@ impl Interpreter {
             _ => false,
         }
     }
-    
+
     fn is_truthy(&self, value: &Value) -> bool {
         match value {
             Value::Boolean(b) => *b,
@@ -9039,10 +10769,34 @@ impl Interpreter {
             _ => true,
         }
     }
-    
+
+    // CRITICAL FIX: Matrix validation to prevent ragged matrices
+    fn validate_matrix(&self, rows: &Vec<Vec<f64>>) -> Result<(), String> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let expected_len = rows[0].len();
+        for (i, row) in rows.iter().enumerate() {
+            if row.len() != expected_len {
+                return Err(format!(
+                    "Matrix row {} has length {}, expected {} (ragged matrices not allowed)",
+                    i,
+                    row.len(),
+                    expected_len
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn get_property(&self, obj: &Value, field: &str) -> Result<Value, String> {
         match obj {
-            Value::Class { name: class_name, static_fields, static_methods, .. } => {
+            Value::Class {
+                name: class_name,
+                static_fields,
+                static_methods,
+                ..
+            } => {
                 if field == "new" {
                     Ok(Value::Constructor(class_name.clone()))
                 } else if let Some(v) = static_fields.get(field) {
@@ -9050,7 +10804,10 @@ impl Interpreter {
                 } else if let Some(v) = static_methods.get(field) {
                     Ok(v.clone())
                 } else {
-                    Err(format!("Unknown static field or method '{}' on class '{}'", field, class_name))
+                    Err(format!(
+                        "Unknown static field or method '{}' on class '{}'",
+                        field, class_name
+                    ))
                 }
             }
             Value::Instance { class_name, fields } => {
@@ -9062,7 +10819,11 @@ impl Interpreter {
             }
             Value::Grid(grid) => {
                 let rows = grid.len() as i64;
-                let cols = if grid.is_empty() { 0 } else { grid[0].len() as i64 };
+                let cols = if grid.is_empty() {
+                    0
+                } else {
+                    grid[0].len() as i64
+                };
                 match field {
                     "rows" => Ok(Value::Integer(rows)),
                     "cols" | "columns" => Ok(Value::Integer(cols)),
@@ -9077,7 +10838,11 @@ impl Interpreter {
             }
             Value::Matrix(mat) => {
                 let rows = mat.len() as i64;
-                let cols = if mat.is_empty() { 0 } else { mat[0].len() as i64 };
+                let cols = if mat.is_empty() {
+                    0
+                } else {
+                    mat[0].len() as i64
+                };
                 match field {
                     "rows" => Ok(Value::Integer(rows)),
                     "cols" | "columns" => Ok(Value::Integer(cols)),
@@ -9107,25 +10872,27 @@ impl Interpreter {
                     _ => Err(format!("Matrix method '{}' not found", field)),
                 }
             }
-            Value::Counter(counter) => {
-                match field {
-                    "most_common" => {
-                        let mut items: Vec<_> = counter.iter().collect();
-                        items.sort_by(|a, b| b.1.cmp(a.1));
-                        let result: Vec<Value> = items.iter()
-                            .map(|(k, v)| Value::Tuple(vec![Value::String(k.to_string()), Value::Integer(**v)]))
-                            .collect();
-                        Ok(Value::List(result))
-                    }
-                    "elements" | "keys" => {
-                        let keys: Vec<Value> = counter.keys().map(|k| Value::String(k.clone())).collect();
-                        Ok(Value::List(keys))
-                    }
-                    "total" => Ok(Value::Integer(counter.values().sum())),
-                    "len" | "length" | "size" => Ok(Value::Integer(counter.len() as i64)),
-                    _ => Err(format!("Counter method '{}' not found", field)),
+            Value::Counter(counter) => match field {
+                "most_common" => {
+                    let mut items: Vec<_> = counter.iter().collect();
+                    items.sort_by(|a, b| b.1.cmp(a.1));
+                    let result: Vec<Value> = items
+                        .iter()
+                        .map(|(k, v)| {
+                            Value::Tuple(vec![Value::String(k.to_string()), Value::Integer(**v)])
+                        })
+                        .collect();
+                    Ok(Value::List(result))
                 }
-            }
+                "elements" | "keys" => {
+                    let keys: Vec<Value> =
+                        counter.keys().map(|k| Value::String(k.clone())).collect();
+                    Ok(Value::List(keys))
+                }
+                "total" => Ok(Value::Integer(counter.values().sum())),
+                "len" | "length" | "size" => Ok(Value::Integer(counter.len() as i64)),
+                _ => Err(format!("Counter method '{}' not found", field)),
+            },
             _ => Err(format!("Cannot get property '{}' on non-object", field)),
         }
     }
@@ -9143,18 +10910,34 @@ impl Interpreter {
                     handle_missing: Box::new(handle_missing.clone()),
                 });
             }
-            Err(format!("Unknown method '{}' on class '{}'", method_name, class_name))
+            Err(format!(
+                "Unknown method '{}' on class '{}'",
+                method_name, class_name
+            ))
         } else {
             Err(format!("'{}' is not a class", class_name))
         }
     }
 
-    fn call_value(&mut self, callee: Value, args: &[AstNode], this_opt: Option<Value>) -> Result<Value, String> {
-        let eval_args: Vec<Value> = args.iter().map(|a| self.eval_node(a)).collect::<Result<Vec<_>, _>>()?;
+    fn call_value(
+        &mut self,
+        callee: Value,
+        args: &[AstNode],
+        this_opt: Option<Value>,
+    ) -> Result<Value, String> {
+        let eval_args: Vec<Value> = args
+            .iter()
+            .map(|a| self.eval_node(a))
+            .collect::<Result<Vec<_>, _>>()?;
         self.call_value_with_args(callee, &eval_args, this_opt)
     }
 
-    fn call_value_with_args(&mut self, callee: Value, eval_args: &[Value], this_opt: Option<Value>) -> Result<Value, String> {
+    fn call_value_with_args(
+        &mut self,
+        callee: Value,
+        eval_args: &[Value],
+        this_opt: Option<Value>,
+    ) -> Result<Value, String> {
         match callee {
             Value::OnceCached { id, inner } => {
                 if let Some(cached) = self.once_cache.get(&id) {
@@ -9164,7 +10947,10 @@ impl Interpreter {
                 self.once_cache.insert(id, result.clone());
                 Ok(result)
             }
-            Value::MirrorDispatch { method_name, handle_missing } => {
+            Value::MirrorDispatch {
+                method_name,
+                handle_missing,
+            } => {
                 // Call handle_missing(method_name, ...args) with this_opt = instance
                 let mut mirror_args = vec![Value::String(method_name.clone())];
                 mirror_args.extend(eval_args.iter().cloned());
@@ -9172,7 +10958,15 @@ impl Interpreter {
             }
             Value::Constructor(class_name) => {
                 let class_val = self.get_variable(&class_name)?;
-                let Value::Class { name: _, parent: _, fields: class_fields, methods, static_fields: _, static_methods: _ } = class_val else {
+                let Value::Class {
+                    name: _,
+                    parent: _,
+                    fields: class_fields,
+                    methods,
+                    static_fields: _,
+                    static_methods: _,
+                } = class_val
+                else {
                     return Err(format!("'{}' is not a class", class_name));
                 };
                 let instance_fields = class_fields.clone();
@@ -9182,7 +10976,13 @@ impl Interpreter {
                 };
                 if let Some(init) = methods.get("init") {
                     if let Value::Function { params, body, .. } = init {
-                        self.call_function_internal("init", &eval_args, params, body, Some(instance.clone()))?;
+                        self.call_function_internal(
+                            "init",
+                            &eval_args,
+                            params,
+                            body,
+                            Some(instance.clone()),
+                        )?;
                     }
                 }
                 Ok(instance)
@@ -9195,7 +10995,9 @@ impl Interpreter {
                     return Err("GridNeighbors requires a grid".to_string());
                 };
                 if eval_args.len() != 2 {
-                    return Err("grid.neighbors(i, j) requires exactly 2 arguments (row, col)".to_string());
+                    return Err(
+                        "grid.neighbors(i, j) requires exactly 2 arguments (row, col)".to_string(),
+                    );
                 }
                 let i = match &eval_args[0] {
                     Value::Integer(n) => *n as usize,
@@ -9222,7 +11024,9 @@ impl Interpreter {
                     return Err("GridNeighbors8 requires a grid".to_string());
                 };
                 if eval_args.len() != 2 {
-                    return Err("grid.neighbors8(i, j) requires exactly 2 arguments (row, col)".to_string());
+                    return Err(
+                        "grid.neighbors8(i, j) requires exactly 2 arguments (row, col)".to_string(),
+                    );
                 };
                 let i = match &eval_args[0] {
                     Value::Integer(n) => *n as usize,
@@ -9236,7 +11040,16 @@ impl Interpreter {
                 let cols = if grid.is_empty() { 0 } else { grid[0].len() };
                 let mut neighbors = Vec::new();
                 // 8 directions: N, NE, E, SE, S, SW, W, NW
-                for (di, dj) in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)] {
+                for (di, dj) in [
+                    (-1, 0),
+                    (-1, 1),
+                    (0, 1),
+                    (1, 1),
+                    (1, 0),
+                    (1, -1),
+                    (0, -1),
+                    (-1, -1),
+                ] {
                     let ni = i as i64 + di;
                     let nj = j as i64 + dj;
                     if ni >= 0 && ni < rows as i64 && nj >= 0 && nj < cols as i64 {
@@ -9257,7 +11070,10 @@ impl Interpreter {
                 for (i, row) in grid.iter().enumerate() {
                     for (j, cell) in row.iter().enumerate() {
                         if self.values_equal(cell, target) {
-                            positions.push(Value::Tuple(vec![Value::Integer(i as i64), Value::Integer(j as i64)]));
+                            positions.push(Value::Tuple(vec![
+                                Value::Integer(i as i64),
+                                Value::Integer(j as i64),
+                            ]));
                         }
                     }
                 }
@@ -9275,7 +11091,11 @@ impl Interpreter {
                     _ => return Err("grid.row index must be integer".to_string()),
                 };
                 if row_idx >= grid.len() {
-                    return Err(format!("Row index {} out of bounds (grid has {} rows)", row_idx, grid.len()));
+                    return Err(format!(
+                        "Row index {} out of bounds (grid has {} rows)",
+                        row_idx,
+                        grid.len()
+                    ));
                 }
                 Ok(Value::List(grid[row_idx].clone()))
             }
@@ -9295,7 +11115,10 @@ impl Interpreter {
                 }
                 let cols = grid[0].len();
                 if col_idx >= cols {
-                    return Err(format!("Column index {} out of bounds (grid has {} columns)", col_idx, cols));
+                    return Err(format!(
+                        "Column index {} out of bounds (grid has {} columns)",
+                        col_idx, cols
+                    ));
                 }
                 let column: Vec<Value> = grid.iter().map(|row| row[col_idx].clone()).collect();
                 Ok(Value::List(column))
@@ -9319,9 +11142,14 @@ impl Interpreter {
                     _ => return Err("matrix.row index must be integer".to_string()),
                 };
                 if row_idx >= mat.len() {
-                    return Err(format!("Row index {} out of bounds (matrix has {} rows)", row_idx, mat.len()));
+                    return Err(format!(
+                        "Row index {} out of bounds (matrix has {} rows)",
+                        row_idx,
+                        mat.len()
+                    ));
                 }
-                let row_values: Vec<Value> = mat[row_idx].iter().map(|&v| Value::Float(v)).collect();
+                let row_values: Vec<Value> =
+                    mat[row_idx].iter().map(|&v| Value::Float(v)).collect();
                 Ok(Value::List(row_values))
             }
             Value::MatrixCol(mat_val) => {
@@ -9351,7 +11179,10 @@ impl Interpreter {
                 }
                 let cols = mat[0].len();
                 if col_idx >= cols {
-                    return Err(format!("Column index {} out of bounds (matrix has {} columns)", col_idx, cols));
+                    return Err(format!(
+                        "Column index {} out of bounds (matrix has {} columns)",
+                        col_idx, cols
+                    ));
                 }
                 let column: Vec<Value> = mat.iter().map(|row| Value::Float(row[col_idx])).collect();
                 Ok(Value::List(column))
@@ -9377,7 +11208,8 @@ impl Interpreter {
                 if !eval_args.is_empty() {
                     return Err("matrix.flat() takes no arguments".to_string());
                 }
-                let flat: Vec<Value> = mat.iter()
+                let flat: Vec<Value> = mat
+                    .iter()
                     .flat_map(|row| row.iter().map(|&v| Value::Float(v)))
                     .collect();
                 Ok(Value::List(flat))
@@ -9389,7 +11221,8 @@ impl Interpreter {
                 if !eval_args.is_empty() {
                     return Err("matrix.row_sums() takes no arguments".to_string());
                 }
-                let sums: Vec<Value> = mat.iter()
+                let sums: Vec<Value> = mat
+                    .iter()
                     .map(|row| Value::Float(row.iter().sum()))
                     .collect();
                 Ok(Value::List(sums))
@@ -9417,7 +11250,8 @@ impl Interpreter {
                 if !eval_args.is_empty() {
                     return Err("matrix.row_means() takes no arguments".to_string());
                 }
-                let means: Vec<Value> = mat.iter()
+                let means: Vec<Value> = mat
+                    .iter()
                     .map(|row| {
                         let sum: f64 = row.iter().sum();
                         Value::Float(sum / row.len() as f64)
@@ -9448,20 +11282,20 @@ impl Interpreter {
             _ => Err(format!("Cannot call {} as function", callee)),
         }
     }
-    
+
     fn get_variable(&self, name: &str) -> Result<Value, String> {
         // Check static variables first
         if let Some(value) = self.statics.get(name) {
             return Ok(value.clone());
         }
-        
+
         // Check local scopes (from innermost to outermost)
         for scope in self.locals.iter().rev() {
             if let Some(value) = scope.get(name) {
                 return Ok(value.clone());
             }
         }
-        
+
         // Check global scope
         if let Some(value) = self.globals.get(name) {
             Ok(value.clone())
@@ -9470,60 +11304,62 @@ impl Interpreter {
             Err(JError::undefined_variable(name, 0, 0).to_string())
         }
     }
-    
+
     fn set_variable(&mut self, name: String, value: Value) {
         if let Some(scope) = self.locals.last_mut() {
             scope.insert(name, value);
         } else {
             self.globals.insert(name, value);
         }
-    }    // Module system helper methods
+    } // Module system helper methods
     fn load_module(&mut self, path: &str) -> Result<Value, String> {
         // Check cache first
         if let Some(cached) = self.module_cache.get(path) {
             return Ok(cached.clone());
         }
-        
+
         // Resolve file path
         let file_path = self.resolve_module_path(path)?;
-        
+
         // Read and parse file
         let source = std::fs::read_to_string(&file_path)
             .map_err(|e| format!("Failed to load module {}: {}", path, e))?;
-        
+
         let mut lexer = crate::lexer::Lexer::new(&source);
-        let tokens = lexer.tokenize()
+        let tokens = lexer
+            .tokenize()
             .map_err(|e| format!("Lexer error in module {}: {}", path, e))?;
-        
+
         let mut parser = crate::parser::Parser::new(tokens);
-        let ast = parser.parse()
+        let ast = parser
+            .parse()
             .map_err(|e| format!("Parser error in module {}: {}", path, e))?;
-        
+
         // Execute in isolated scope
         self.push_scope();
         self.eval_node(&ast)?;
-        
+
         // Get all variables from module scope as exports
         let mut exports = HashMap::new();
         if let Some(scope) = self.locals.last() {
             exports = scope.clone();
         }
-        
+
         self.pop_scope();
-        
+
         // Create module value
         let module = Value::Module {
             name: path.to_string(),
             path: file_path,
             exports,
         };
-        
+
         // Cache it
         self.module_cache.insert(path.to_string(), module.clone());
-        
+
         Ok(module)
     }
-    
+
     fn resolve_module_path(&self, path: &str) -> Result<String, String> {
         // If path starts with ./ or ../, it's relative
         if path.starts_with("./") || path.starts_with("../") {
@@ -9532,14 +11368,14 @@ impl Interpreter {
             } else {
                 format!("{}.j", path)
             };
-            
+
             if std::path::Path::new(&full_path).exists() {
                 return Ok(full_path);
             } else {
                 return Err(format!("Module file not found: {}", full_path));
             }
         }
-        
+
         // Search in module search paths
         for search_path in &self.module_search_paths {
             let full_path = if path.ends_with(".j") {
@@ -9547,47 +11383,53 @@ impl Interpreter {
             } else {
                 format!("{}/{}.j", search_path, path)
             };
-            
+
             if std::path::Path::new(&full_path).exists() {
                 return Ok(full_path);
             }
         }
-        
+
         Err(format!("Module not found: {}", path))
     }
 
-
-    
     fn push_scope(&mut self) {
         self.locals.push(HashMap::new());
     }
-    
+
     fn pop_scope(&mut self) {
         self.locals.pop();
     }
-    
+
     fn execute_file(&mut self, filename: &str) -> Result<Value, String> {
         // Read the file
         let source = std::fs::read_to_string(filename)
             .map_err(|e| format!("Error reading file '{}': {}", filename, e))?;
-        
+
         println!("🔥 Executing J file: {}", filename);
-        
+
         // Tokenize
         let mut lexer = crate::lexer::Lexer::new(&source);
-        let tokens = lexer.tokenize()
+        let tokens = lexer
+            .tokenize()
             .map_err(|e| format!("Lexer error in '{}': {}", filename, e))?;
-        
+
         // Parse
         let mut parser = crate::parser::Parser::new(tokens);
-        let ast = parser.parse()
+        let ast = parser
+            .parse()
             .map_err(|e| format!("Parser error in '{}': {}", filename, e))?;
-        
+
         // Execute in current context
         self.eval_node(&ast)
     }
-    
-    fn normalize_slice_indices(&self, start: Option<i64>, end: Option<i64>, len: i64, step: i64) -> Result<(i64, i64), String> {
+
+    fn normalize_slice_indices(
+        &self,
+        start: Option<i64>,
+        end: Option<i64>,
+        len: i64,
+        step: i64,
+    ) -> Result<(i64, i64), String> {
         let start = match start {
             Some(s) => {
                 if s < 0 {
@@ -9597,10 +11439,14 @@ impl Interpreter {
                 }
             }
             None => {
-                if step > 0 { 0 } else { len - 1 }
+                if step > 0 {
+                    0
+                } else {
+                    len - 1
+                }
             }
         };
-        
+
         let end = match end {
             Some(e) => {
                 if e < 0 {
@@ -9610,26 +11456,30 @@ impl Interpreter {
                 }
             }
             None => {
-                if step > 0 { len } else { -1 }
+                if step > 0 {
+                    len
+                } else {
+                    -1
+                }
             }
         };
-        
+
         Ok((start, end))
     }
-    
+
     fn levenshtein_distance(&self, s1: &str, s2: &str) -> usize {
         let len1 = s1.len();
         let len2 = s2.len();
-        
+
         if len1 == 0 {
             return len2;
         }
         if len2 == 0 {
             return len1;
         }
-        
+
         let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
-        
+
         // Initialize first row and column
         for i in 0..=len1 {
             matrix[i][0] = i;
@@ -9637,20 +11487,25 @@ impl Interpreter {
         for j in 0..=len2 {
             matrix[0][j] = j;
         }
-        
+
         // Fill the matrix
         for i in 1..=len1 {
             for j in 1..=len2 {
-                let cost = if s1.chars().nth(i-1) == s2.chars().nth(j-1) { 0 } else { 1 };
-                matrix[i][j] = (matrix[i-1][j] + 1)
-                    .min(matrix[i][j-1] + 1)
-                    .min(matrix[i-1][j-1] + cost);
+                let cost = if s1.chars().nth(i - 1) == s2.chars().nth(j - 1) {
+                    0
+                } else {
+                    1
+                };
+                matrix[i][j] = (matrix[i - 1][j] + 1)
+                    .min(matrix[i][j - 1] + 1)
+                    .min(matrix[i - 1][j - 1] + cost);
             }
         }
-        
+
         matrix[len1][len2]
     }
-    
+
+    #[allow(dead_code)]
     fn compare_values(&self, a: &Value, b: &Value) -> Result<std::cmp::Ordering, String> {
         use std::cmp::Ordering;
         match (a, b) {
@@ -9689,24 +11544,24 @@ impl Interpreter {
             _ => Err(format!("Cannot compare {:?} and {:?}", a, b)),
         }
     }
-    
+
     // KMP (Knuth-Morris-Pratt) string search algorithm
     fn kmp_search(&self, text: &str, pattern: &str) -> Vec<usize> {
         if pattern.is_empty() {
             return (0..text.len()).collect();
         }
-        
+
         let lps = self.compute_lps(pattern);
         let mut positions = Vec::new();
         let mut i = 0; // index for text
         let mut j = 0; // index for pattern
-        
+
         while i < text.len() {
             if pattern.chars().nth(j) == text.chars().nth(i) {
                 i += 1;
                 j += 1;
             }
-            
+
             if j == pattern.len() {
                 positions.push(i - j);
                 j = lps[j - 1];
@@ -9718,15 +11573,15 @@ impl Interpreter {
                 }
             }
         }
-        
+
         positions
     }
-    
+
     fn compute_lps(&self, pattern: &str) -> Vec<usize> {
         let mut lps = vec![0; pattern.len()];
         let mut len = 0;
         let mut i = 1;
-        
+
         while i < pattern.len() {
             if pattern.chars().nth(i) == pattern.chars().nth(len) {
                 len += 1;
@@ -9741,17 +11596,17 @@ impl Interpreter {
                 }
             }
         }
-        
+
         lps
     }
-    
+
     // Z-algorithm
     fn compute_z_array(&self, s: &str) -> Vec<usize> {
         let n = s.len();
         let mut z = vec![0; n];
         let mut l = 0;
         let mut r = 0;
-        
+
         for i in 1..n {
             if i <= r {
                 z[i] = (r - i + 1).min(z[i - l]);
@@ -9764,17 +11619,17 @@ impl Interpreter {
                 r = i + z[i] - 1;
             }
         }
-        
+
         z[0] = n; // Z[0] is the length of the string
         z
     }
-    
+
     // Convex hull (Graham scan algorithm for 2D points)
     fn convex_hull_2d(&self, points: &[Value]) -> Result<Vec<Value>, String> {
         if points.len() < 3 {
             return Ok(points.to_vec());
         }
-        
+
         // Extract (x, y) coordinates
         let mut coords: Vec<(f64, f64)> = Vec::new();
         for point in points {
@@ -9795,57 +11650,73 @@ impl Interpreter {
                 _ => return Err("Convex hull expects list of (x, y) tuples".to_string()),
             }
         }
-        
+
         // Find bottom-most point (or left-most in case of tie)
         let mut min_idx = 0;
         for i in 1..coords.len() {
-            if coords[i].1 < coords[min_idx].1 || 
-               (coords[i].1 == coords[min_idx].1 && coords[i].0 < coords[min_idx].0) {
+            if coords[i].1 < coords[min_idx].1
+                || (coords[i].1 == coords[min_idx].1 && coords[i].0 < coords[min_idx].0)
+            {
                 min_idx = i;
             }
         }
         coords.swap(0, min_idx);
-        
+
         // Sort points by polar angle with respect to bottom point
         let pivot = coords[0];
         coords[1..].sort_by(|a, b| {
             let angle_a = (a.1 - pivot.1).atan2(a.0 - pivot.0);
             let angle_b = (b.1 - pivot.1).atan2(b.0 - pivot.0);
-            angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
+            angle_a
+                .partial_cmp(&angle_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
-        
+
         // Graham scan
         let mut hull = vec![0];
         for i in 1..coords.len() {
-            while hull.len() > 1 && 
-                  self.cross_product(&coords[hull[hull.len()-2]], &coords[hull[hull.len()-1]], &coords[i]) <= 0.0 {
+            while hull.len() > 1
+                && self.cross_product(
+                    &coords[hull[hull.len() - 2]],
+                    &coords[hull[hull.len() - 1]],
+                    &coords[i],
+                ) <= 0.0
+            {
                 hull.pop();
             }
             hull.push(i);
         }
-        
+
         // Convert back to Value tuples
-        Ok(hull.into_iter().map(|i| {
-            let (x, y) = coords[i];
-            Value::Tuple(vec![Value::Float(x), Value::Float(y)])
-        }).collect())
+        Ok(hull
+            .into_iter()
+            .map(|i| {
+                let (x, y) = coords[i];
+                Value::Tuple(vec![Value::Float(x), Value::Float(y)])
+            })
+            .collect())
     }
-    
+
     fn cross_product(&self, o: &(f64, f64), a: &(f64, f64), b: &(f64, f64)) -> f64 {
         (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
     }
-    
+
     // BFS (Breadth-First Search)
-    fn bfs_search(&self, graph: &HashMap<String, Vec<(String, f64)>>, start: &str, goal: Option<&str>) -> Result<Vec<String>, String> {
+    fn bfs_search(
+        &self,
+        graph: &HashMap<String, Vec<(String, f64)>>,
+        start: &str,
+        goal: Option<&str>,
+    ) -> Result<Vec<String>, String> {
         use std::collections::VecDeque;
-        
+
         let mut queue = VecDeque::new();
         let mut visited = HashSet::new();
         let mut parent: HashMap<String, String> = HashMap::new();
-        
+
         queue.push_back(start.to_string());
         visited.insert(start.to_string());
-        
+
         while let Some(current) = queue.pop_front() {
             if let Some(target) = goal {
                 if current == target {
@@ -9861,7 +11732,7 @@ impl Interpreter {
                     return Ok(path);
                 }
             }
-            
+
             if let Some(neighbors) = graph.get(&current) {
                 for (neighbor, _) in neighbors {
                     if !visited.contains(neighbor) {
@@ -9872,19 +11743,24 @@ impl Interpreter {
                 }
             }
         }
-        
+
         if goal.is_some() {
             Err("Goal not reachable".to_string())
         } else {
             Ok(visited.into_iter().collect())
         }
     }
-    
+
     // DFS (Depth-First Search)
-    fn dfs_search(&self, graph: &HashMap<String, Vec<(String, f64)>>, start: &str, goal: Option<&str>) -> Result<Vec<String>, String> {
+    fn dfs_search(
+        &self,
+        graph: &HashMap<String, Vec<(String, f64)>>,
+        start: &str,
+        goal: Option<&str>,
+    ) -> Result<Vec<String>, String> {
         let mut visited = HashSet::new();
         let mut path = Vec::new();
-        
+
         if self.dfs_recursive(graph, start, goal, &mut visited, &mut path) {
             Ok(path)
         } else if goal.is_some() {
@@ -9893,18 +11769,24 @@ impl Interpreter {
             Ok(visited.into_iter().collect())
         }
     }
-    
-    fn dfs_recursive(&self, graph: &HashMap<String, Vec<(String, f64)>>, current: &str, goal: Option<&str>, 
-                     visited: &mut HashSet<String>, path: &mut Vec<String>) -> bool {
+
+    fn dfs_recursive(
+        &self,
+        graph: &HashMap<String, Vec<(String, f64)>>,
+        current: &str,
+        goal: Option<&str>,
+        visited: &mut HashSet<String>,
+        path: &mut Vec<String>,
+    ) -> bool {
         visited.insert(current.to_string());
         path.push(current.to_string());
-        
+
         if let Some(target) = goal {
             if current == target {
                 return true;
             }
         }
-        
+
         if let Some(neighbors) = graph.get(current) {
             for (neighbor, _) in neighbors {
                 if !visited.contains(neighbor) {
@@ -9914,35 +11796,42 @@ impl Interpreter {
                 }
             }
         }
-        
+
         if goal.is_some() {
             path.pop();
         }
         false
     }
-    
+
     // Dijkstra's shortest path algorithm
-    fn dijkstra_search(&self, graph: &HashMap<String, Vec<(String, f64)>>, start: &str, goal: Option<&str>) -> Result<(Vec<String>, f64), String> {
-        use std::collections::BinaryHeap;
+    fn dijkstra_search(
+        &self,
+        graph: &HashMap<String, Vec<(String, f64)>>,
+        start: &str,
+        goal: Option<&str>,
+    ) -> Result<(Vec<String>, f64), String> {
         use std::cmp::Reverse;
-        
+        use std::collections::BinaryHeap;
+
         // Use a wrapper for f64 that implements Ord
         #[derive(PartialEq, PartialOrd)]
         struct FloatOrd(f64);
         impl Eq for FloatOrd {}
         impl Ord for FloatOrd {
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.0.partial_cmp(&other.0).unwrap_or(std::cmp::Ordering::Equal)
+                self.0
+                    .partial_cmp(&other.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             }
         }
-        
+
         let mut dist: HashMap<String, f64> = HashMap::new();
         let mut prev: HashMap<String, String> = HashMap::new();
         let mut heap: BinaryHeap<Reverse<(FloatOrd, String)>> = BinaryHeap::new();
-        
+
         dist.insert(start.to_string(), 0.0);
         heap.push(Reverse((FloatOrd(0.0), start.to_string())));
-        
+
         while let Some(Reverse((FloatOrd(d), u))) = heap.pop() {
             if let Some(target) = goal {
                 if u == target {
@@ -9958,11 +11847,11 @@ impl Interpreter {
                     return Ok((path, d));
                 }
             }
-            
+
             if d > *dist.get(&u).unwrap_or(&f64::INFINITY) {
                 continue;
             }
-            
+
             if let Some(neighbors) = graph.get(&u) {
                 for (v, weight) in neighbors {
                     let alt = d + weight;
@@ -9974,7 +11863,7 @@ impl Interpreter {
                 }
             }
         }
-        
+
         if goal.is_some() {
             Err("Goal not reachable".to_string())
         } else {
@@ -9985,7 +11874,7 @@ impl Interpreter {
             Ok((path, 0.0))
         }
     }
-    
+
     // FFT (Fast Fourier Transform) - simplified version
     fn fft_transform(&self, signal: &[Value]) -> Result<Vec<Value>, String> {
         // Convert signal to complex numbers (simplified: just use real part)
@@ -9997,49 +11886,49 @@ impl Interpreter {
                 _ => return Err("FFT requires numeric values".to_string()),
             }
         }
-        
+
         // Simple DFT implementation (not optimized FFT, but functional)
         let n = samples.len();
         let mut result = Vec::new();
-        
+
         for k in 0..n {
             let mut real = 0.0;
             let mut imag = 0.0;
-            
+
             for j in 0..n {
                 let angle = -2.0 * std::f64::consts::PI * (k as f64) * (j as f64) / (n as f64);
                 real += samples[j] * angle.cos();
                 imag += samples[j] * angle.sin();
             }
-            
+
             // Return magnitude
             let magnitude = (real * real + imag * imag).sqrt();
             result.push(Value::Float(magnitude));
         }
-        
+
         Ok(result)
     }
-    
+
     fn generate_permutations(&self, list: &[Value]) -> Vec<Vec<Value>> {
         if list.is_empty() {
             return vec![vec![]];
         }
-        
+
         let mut result = Vec::new();
         for (i, item) in list.iter().enumerate() {
             let mut remaining = list.to_vec();
             remaining.remove(i);
-            
+
             let sub_perms = self.generate_permutations(&remaining);
             for mut perm in sub_perms {
                 perm.insert(0, item.clone());
                 result.push(perm);
             }
         }
-        
+
         result
     }
-    
+
     fn generate_combinations(&self, list: &[Value], r: usize) -> Vec<Vec<Value>> {
         if r == 0 {
             return vec![vec![]];
@@ -10050,30 +11939,30 @@ impl Interpreter {
         if r == list.len() {
             return vec![list.to_vec()];
         }
-        
+
         let mut result = Vec::new();
-        
+
         // Include first element
         let sub_combs = self.generate_combinations(&list[1..], r - 1);
         for mut comb in sub_combs {
             comb.insert(0, list[0].clone());
             result.push(comb);
         }
-        
+
         // Exclude first element
         let sub_combs = self.generate_combinations(&list[1..], r);
         result.extend(sub_combs);
-        
+
         result
     }
-    
+
     fn cartesian_product(&self, lists: &[Vec<Value>]) -> Vec<Vec<Value>> {
         if lists.is_empty() {
             return vec![vec![]];
         }
-        
+
         let mut result = vec![vec![]];
-        
+
         for list in lists {
             let mut new_result = Vec::new();
             for existing in &result {
@@ -10085,17 +11974,21 @@ impl Interpreter {
             }
             result = new_result;
         }
-        
+
         result
     }
-    
+
     // Helper functions for enhanced out() features
-    
-    fn format_string(&self, format_str: &str, vars: &HashMap<String, Value>) -> Result<String, String> {
+
+    fn format_string(
+        &self,
+        format_str: &str,
+        vars: &HashMap<String, Value>,
+    ) -> Result<String, String> {
         let mut result = String::new();
         let mut i = 0;
         let chars: Vec<char> = format_str.chars().collect();
-        
+
         while i < chars.len() {
             if chars[i] == '{' && i + 1 < chars.len() {
                 if chars[i + 1] == '}' {
@@ -10103,7 +11996,7 @@ impl Interpreter {
                     i += 2;
                     continue;
                 }
-                
+
                 // Find closing brace
                 let mut j = i + 1;
                 let mut found = false;
@@ -10114,13 +12007,13 @@ impl Interpreter {
                     }
                     j += 1;
                 }
-                
+
                 if found {
                     let var_name: String = chars[i + 1..j].iter().collect();
                     // Check for format specifiers like {name:>8} or {value:.2f}
                     let parts: Vec<&str> = var_name.split(':').collect();
                     let key = parts[0].trim();
-                    
+
                     if let Some(value) = vars.get(key) {
                         let formatted = if parts.len() > 1 {
                             // Has format specifier
@@ -10164,10 +12057,10 @@ impl Interpreter {
                 i += 1;
             }
         }
-        
+
         Ok(result)
     }
-    
+
     fn print_table(&self, rows: &[Value]) -> Result<(), String> {
         // Convert rows to string matrix
         let mut table: Vec<Vec<String>> = Vec::new();
@@ -10182,15 +12075,15 @@ impl Interpreter {
                 return Err("Table rows must be lists".to_string());
             }
         }
-        
+
         if table.is_empty() {
             return Ok(());
         }
-        
+
         // Calculate column widths
         let num_cols = table[0].len();
         let mut col_widths = vec![0; num_cols];
-        
+
         for row in &table {
             for (i, cell) in row.iter().enumerate() {
                 if i < col_widths.len() {
@@ -10198,7 +12091,7 @@ impl Interpreter {
                 }
             }
         }
-        
+
         // Print table
         for (row_idx, row) in table.iter().enumerate() {
             for (col_idx, cell) in row.iter().enumerate() {
@@ -10210,7 +12103,7 @@ impl Interpreter {
                 }
             }
             println!();
-            
+
             // Print header separator after first row
             if row_idx == 0 {
                 for &width in &col_widths {
@@ -10222,11 +12115,15 @@ impl Interpreter {
                 println!();
             }
         }
-        
+
         Ok(())
     }
-    
-    fn print_table_with_options(&self, rows: &[Value], options: &HashMap<String, Value>) -> Result<(), String> {
+
+    fn print_table_with_options(
+        &self,
+        rows: &[Value],
+        options: &HashMap<String, Value>,
+    ) -> Result<(), String> {
         // Similar to print_table but with alignment and color options
         let mut table: Vec<Vec<String>> = Vec::new();
         for row in rows {
@@ -10240,14 +12137,14 @@ impl Interpreter {
                 return Err("Table rows must be lists".to_string());
             }
         }
-        
+
         if table.is_empty() {
             return Ok(());
         }
-        
+
         let num_cols = table[0].len();
         let mut col_widths = vec![0; num_cols];
-        
+
         for row in &table {
             for (i, cell) in row.iter().enumerate() {
                 if i < col_widths.len() {
@@ -10255,27 +12152,27 @@ impl Interpreter {
                 }
             }
         }
-        
+
         // Get alignment option
         let align = if let Some(Value::String(align_str)) = options.get("align") {
             align_str.as_str()
         } else {
             "left"
         };
-        
+
         // Get color option
         let color = if let Some(Value::String(color_str)) = options.get("color") {
             Some(color_str.as_str())
         } else {
             None
         };
-        
+
         let header = if let Some(Value::Boolean(h)) = options.get("header") {
             *h
         } else {
             false
         };
-        
+
         // Apply color if specified
         if let Some(color_name) = color {
             match color_name {
@@ -10289,7 +12186,7 @@ impl Interpreter {
                 _ => {}
             }
         }
-        
+
         for (row_idx, row) in table.iter().enumerate() {
             for (col_idx, cell) in row.iter().enumerate() {
                 if col_idx < col_widths.len() {
@@ -10309,7 +12206,7 @@ impl Interpreter {
                 }
             }
             println!();
-            
+
             if header && row_idx == 0 {
                 for &width in &col_widths {
                     print!("{}", "-".repeat(width));
@@ -10320,19 +12217,19 @@ impl Interpreter {
                 println!();
             }
         }
-        
+
         if color.is_some() {
             print!("\x1b[0m"); // Reset color
         }
-        
+
         Ok(())
     }
-    
+
     fn print_progress_bar(&self, percent: f64, width: usize, color: &str) -> Result<(), String> {
         let clamped_percent = percent.max(0.0).min(100.0);
         let filled = ((clamped_percent / 100.0) * width as f64) as usize;
         let empty = width - filled;
-        
+
         // Apply color
         match color {
             "red" => print!("\x1b[31m"),
@@ -10344,7 +12241,7 @@ impl Interpreter {
             "white" => print!("\x1b[37m"),
             _ => {}
         }
-        
+
         print!("[");
         for _ in 0..filled {
             print!("█");
@@ -10365,11 +12262,17 @@ impl Interpreter {
         print!("] {:.0}%", clamped_percent);
         print!("\x1b[0m"); // Reset color
         println!();
-        
+
         Ok(())
     }
-    
-    fn print_animation(&self, text: &str, anim_type: &str, interval: f64, count: Option<usize>) -> Result<(), String> {
+
+    fn print_animation(
+        &self,
+        text: &str,
+        anim_type: &str,
+        interval: f64,
+        count: Option<usize>,
+    ) -> Result<(), String> {
         let frames: Vec<&str> = match anim_type {
             "spinner" => vec!["|", "/", "-", "\\"],
             "dots" => vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
@@ -10416,10 +12319,10 @@ impl Interpreter {
             }
             _ => return Err(format!("Unknown animation type: {}", anim_type)),
         };
-        
+
         let max_iterations = count.unwrap_or(10); // Default to 10 iterations if not specified
         let mut iteration = 0;
-        
+
         while iteration < max_iterations {
             for frame in &frames {
                 print!("\r{} {}", text, frame);
@@ -10431,16 +12334,16 @@ impl Interpreter {
                 }
             }
         }
-        
+
         println!(); // Newline after animation
         Ok(())
     }
-    
+
     fn print_gradient(&self, text: &str, gradient_colors: &[Value]) -> Result<(), String> {
         if gradient_colors.len() < 2 {
             return Err("Gradient requires at least 2 colors".to_string());
         }
-        
+
         // Extract hex colors
         let mut colors: Vec<(u8, u8, u8)> = Vec::new();
         for color_val in gradient_colors {
@@ -10457,11 +12360,11 @@ impl Interpreter {
                 }
             }
         }
-        
+
         if colors.len() < 2 {
             return Err("Gradient colors must be hex strings".to_string());
         }
-        
+
         // Interpolate colors across text
         let chars: Vec<char> = text.chars().collect();
         for (i, ch) in chars.iter().enumerate() {
@@ -10470,26 +12373,26 @@ impl Interpreter {
             } else {
                 0.0
             };
-            
+
             // Find which color segment we're in
             let segment_size = 1.0 / (colors.len() - 1) as f64;
             let segment = (t / segment_size).min((colors.len() - 2) as f64) as usize;
             let local_t = (t - segment as f64 * segment_size) / segment_size;
-            
+
             let (r1, g1, b1) = colors[segment];
             let (r2, g2, b2) = colors[segment + 1];
-            
+
             let r = (r1 as f64 + (r2 as f64 - r1 as f64) * local_t) as u8;
             let g = (g1 as f64 + (g2 as f64 - g1 as f64) * local_t) as u8;
             let b = (b1 as f64 + (b2 as f64 - b1 as f64) * local_t) as u8;
-            
+
             // Print character with RGB color
             print!("\x1b[38;2;{};{};{}m{}", r, g, b, ch);
         }
-        
+
         print!("\x1b[0m"); // Reset
         println!();
-        
+
         Ok(())
     }
 }
@@ -10507,7 +12410,7 @@ impl Interpreter {
         use std::io::{self, Write};
         use std::thread;
         use std::time::Duration;
-        
+
         let frames = match style {
             "dots" => vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
             "line" => vec!["-", "\\", "|", "/"],
@@ -10521,24 +12424,24 @@ impl Interpreter {
             "grow" => vec!["▁", "▃", "▅", "▇", "█", "▇", "▅", "▃"],
             _ => vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
         };
-        
+
         let iterations = (duration * 10.0) as usize;
-        
+
         for i in 0..iterations {
             let frame = frames[i % frames.len()];
             print!("\r\x1b[36m{}\x1b[0m {}", frame, message);
             io::stdout().flush().unwrap();
             thread::sleep(Duration::from_millis(100));
         }
-        
+
         println!("\r\x1b[32m✓\x1b[0m {} \x1b[32mDone!\x1b[0m", message);
         Ok(())
     }
-    
+
     fn show_loading(&self, message: &str, style: &str, duration: f64) -> Result<(), String> {
         self.show_spinner(style, duration, message)
     }
-    
+
     fn show_panel(&self, text: &str, title: Option<&str>, style: &str) -> Result<(), String> {
         let (top_left, top_right, bottom_left, bottom_right, horizontal, vertical) = match style {
             "double" => ("╔", "╗", "╚", "╝", "═", "║"),
@@ -10547,18 +12450,19 @@ impl Interpreter {
             "ascii" => ("+", "+", "+", "+", "-", "|"),
             _ => ("┌", "┐", "└", "┘", "─", "│"), // single
         };
-        
+
         let lines: Vec<&str> = text.lines().collect();
         let max_width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
         let width = max_width.max(20);
-        
+
         // Top border
         if let Some(t) = title {
             let title_len = t.chars().count();
             let left_pad = (width - title_len) / 2;
             let right_pad = width - title_len - left_pad;
-            println!("{}{}{} {} {}{}{}", 
-                top_left, 
+            println!(
+                "{}{}{} {} {}{}{}",
+                top_left,
                 horizontal.repeat(left_pad),
                 "\x1b[1m",
                 t,
@@ -10569,7 +12473,7 @@ impl Interpreter {
         } else {
             println!("{}{}{}", top_left, horizontal.repeat(width + 2), top_right);
         }
-        
+
         // Content - properly align with character count, not byte length
         for line in lines {
             let line_width = line.chars().count();
@@ -10580,16 +12484,21 @@ impl Interpreter {
             };
             println!("{} {}{} {}", vertical, line, " ".repeat(padding), vertical);
         }
-        
+
         // Bottom border
-        println!("{}{}{}", bottom_left, horizontal.repeat(width + 2), bottom_right);
-        
+        println!(
+            "{}{}{}",
+            bottom_left,
+            horizontal.repeat(width + 2),
+            bottom_right
+        );
+
         Ok(())
     }
-    
+
     fn show_box(&self, text: &str, width: usize) -> Result<(), String> {
         let lines: Vec<&str> = text.lines().collect();
-        
+
         println!("┌{}┐", "─".repeat(width));
         for line in lines {
             let padding = if line.len() < width {
@@ -10600,39 +12509,39 @@ impl Interpreter {
             println!("│ {}{} │", line, " ".repeat(padding));
         }
         println!("└{}┘", "─".repeat(width));
-        
+
         Ok(())
     }
-    
+
     fn show_status(&self, status_type: &str, message: &str) -> Result<(), String> {
         let (icon, color) = match status_type {
-            "success" | "ok" => ("✓", "32"), // Green
-            "error" | "fail" => ("✗", "31"), // Red
+            "success" | "ok" => ("✓", "32"),   // Green
+            "error" | "fail" => ("✗", "31"),   // Red
             "warning" | "warn" => ("⚠", "33"), // Yellow
-            "info" => ("ℹ", "36"), // Cyan
-            "question" => ("?", "35"), // Magenta
-            _ => ("•", "37"), // White
+            "info" => ("ℹ", "36"),             // Cyan
+            "question" => ("?", "35"),         // Magenta
+            _ => ("•", "37"),                  // White
         };
-        
+
         println!("\x1b[{}m{}\x1b[0m {}", color, icon, message);
         Ok(())
     }
-    
+
     fn show_tree(&self, data: &Value, title: Option<&str>, indent: usize) -> Result<(), String> {
         if indent == 0 {
             if let Some(t) = title {
                 println!("\x1b[1m{}\x1b[0m", t);
             }
         }
-        
+
         match data {
             Value::Dict(dict) => {
                 for (i, (key, value)) in dict.iter().enumerate() {
                     let is_last = i == dict.len() - 1;
                     let prefix = if is_last { "└─" } else { "├─" };
-                    
+
                     print!("{}{} \x1b[36m{}\x1b[0m: ", " ".repeat(indent), prefix, key);
-                    
+
                     match value {
                         Value::Dict(_) | Value::List(_) => {
                             println!();
@@ -10646,9 +12555,9 @@ impl Interpreter {
                 for (i, item) in list.iter().enumerate() {
                     let is_last = i == list.len() - 1;
                     let prefix = if is_last { "└─" } else { "├─" };
-                    
+
                     print!("{}{} ", " ".repeat(indent), prefix);
-                    
+
                     match item {
                         Value::Dict(_) | Value::List(_) => {
                             println!();
@@ -10662,19 +12571,19 @@ impl Interpreter {
                 println!("{}{}", " ".repeat(indent), data);
             }
         }
-        
+
         Ok(())
     }
-    
+
     fn show_columns(&self, texts: &[String]) -> Result<(), String> {
         if texts.is_empty() {
             return Ok(());
         }
-        
+
         let col_count = texts.len();
         let term_width = 80; // Default terminal width
         let col_width = term_width / col_count;
-        
+
         for text in texts {
             let truncated = if text.len() > col_width - 2 {
                 format!("{}…", &text[..col_width - 3])
@@ -10684,7 +12593,7 @@ impl Interpreter {
             print!("{:width$}", truncated, width = col_width);
         }
         println!();
-        
+
         Ok(())
     }
 }

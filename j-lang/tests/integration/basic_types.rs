@@ -6,7 +6,7 @@ fn test_integer_operations() {
         .args(&["run", "--", "run", "tests/fixtures/basic_types.j"])
         .output()
         .expect("Failed to execute");
-    
+
     assert!(output.status.success());
 }
 
@@ -16,6 +16,6 @@ fn test_string_operations() {
         .args(&["run", "--", "run", "tests/fixtures/strings.j"])
         .output()
         .expect("Failed to execute");
-    
+
     assert!(output.status.success());
 }
