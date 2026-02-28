@@ -19,7 +19,21 @@
 
 ## What is Jade?
 
-Jade is a **memory-safe**, **readable** language built for data and algorithms. Values flow through **pipelines** (`x |> f`); **cond** and **when** route a value into the first matching branch; **either** is a pipeline-style ternary. You get **pattern matching** with guards, **broadcast calls** (`fn.(list, scalar)`), and **borrow_split(list, i) |> left, right { ... }** to split a list and use both halves in one scope. A **converge** loop runs until the body’s result stops changing (fixed-point). Loops go beyond plain `for`: **indexed**, **reverse**, **step**, **zip**, **parallel**, **chunked**. First-class **graphs** (bfs, dfs, dijkstra, topological sort), **deques**, **priority queues**, **union-find**, **tries**, **ring buffers**, **sorted lists**, **sliding windows**. Declare variables with **enc** or **secret** for encryption and redaction. **memo(f)** in the stdlib; algo helpers like **lower_bound**, **upper_bound**, **prefix_sum**, **kadane**, **merge_sorted**, **sliding_window**, **two_pointers_sum**, **flood_fill**. One binary: interpreter, REPL, Jolt.
+Jade is a **modern, memory-safe** programming language crafted for clean, expressive code—especially when you're working with data, algorithms, concurrency, or tools. It feels **concise and readable** while giving you powerful, low-noise abstractions:
+
+- **Values flow naturally through pipelines:** `x |> map(_ * 2) |> filter(_ > 0) |> sum()`
+- **cond** and **when** let a value travel through branches until one matches:  
+  `cond(x) { |> x == 42 : "the answer" |> else : "keep looking" }`
+- **either** is a pipeline-friendly ternary/Result handler that picks the first valid path
+- **Deep pattern matching with guards:** `match point { (x,y) if x == y : "diagonal" }`
+- **Broadcast calls:** `fn.(list, scalar)` applies a function element-wise or with broadcasting
+- **borrow_split(list, i) |> left, right { parallel { left.map(...); right.map(...) } }** splits mutable borrows safely so you can work on both halves concurrently without locks
+- **converge** loop runs until the body's result stabilizes (great for fixed-point computations, iterative solvers, cellular automata)
+- **Loops are rich and varied:** indexed, reverse, step, zip, parallel, chunked, sweep, meet, while_nonzero, while_change, etc.
+- **First-class support** for graphs (BFS, DFS, Dijkstra, topological sort), deques, priority queues, union-find, tries, ring buffers, sorted lists, sliding windows, and more
+- **Security is first-class:** enc&lt;T&gt; for encrypted values, secret&lt;T&gt; for redacted secrets, **zeroize** for secure wiping
+- **Memoization is trivial:** `memo(f)` in stdlib
+- **algo** module provides lower_bound, upper_bound, prefix_sum, kadane, merge_sorted, sliding_window, two_pointers_sum, flood_fill, and other classic helpers
 
 ```jdl
 fn | greet ( str | name ) > {
@@ -31,18 +45,6 @@ int: total = 0
 for x in [1, 2, 3] { total = total + x }
 out("Sum: " + total)
 ```
-
----
-
-## Features
-
-| | |
-|---|---|
-| **Pipelines & routing** | `x \|> f` passes `x` as `_` into `f`; chain as long as you like. **cond** / **when** push a value through `condition \|> body` branches; **either** expr `\|>` true_body `\|>` false_body. **Match** with guards. **borrow_split(list, i) \|> left, right { body }** splits and binds both sides. |
-| **Loops that match algorithms** | **converge { body }** runs until the body returns the same value twice (fixed-point). **for** comes as indexed, reverse, step, zip, parallel, chunked. **Broadcast** calls: `fn.(list, scalar)` applies element-wise. |
-| **Data structures in the language** | **Graph** (bfs, dfs, dijkstra, topological_sort), **deque**, **priority queue**, **union-find** (uf_new, uf_find, uf_union, uf_connected), **trie** (insert, contains, prefix_search), **ring buffer**, **sorted list**, **bag** (multiset), **sliding window** and **view** (zero-copy). |
-| **Algo & number primitives** | **binary_search**, **lower_bound**, **upper_bound**, **prefix_sum**, **kadane**, **merge_sorted**, **sliding_window**, **two_pointers_sum**, **flood_fill**. **gcd**/lcm, **stats** (mean, variance), **bits** (popcount, etc.). **memo(f)** memoizes a one-arg function. |
-| **Security in the type system** | Declare with **enc** or **secret**; values are stored encrypted or redacted in logs. First-class **Encrypted** and **Secret** in the runtime. |
 
 ---
 
