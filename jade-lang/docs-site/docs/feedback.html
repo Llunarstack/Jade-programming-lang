@@ -51,29 +51,38 @@
       </nav>
       <nav class="docs-toc">
         <div class="toc-title">On this page</div>
-        <a href="#bugs">Bug reports</a>
-        <a href="#features">Feature requests</a>
-        <a href="#issues">Open an issue</a>
+        <a href="#submit">Submit feedback</a>
+        <a href="#recent">Recent submissions</a>
       </nav>
     </aside>
     <article class="docs-content">
       <h1>Feedback &amp; suggestions</h1>
-      <p>Report bugs, suggest features, or ask for changes. We use GitHub Issues so everything is tracked and searchable.</p>
+      <p>Report bugs, suggest features, or share ideas. Submissions are stored on this site (in your browser).</p>
 
-      <h2 id="bugs">Bug reports</h2>
-      <p>If something doesn’t work as expected—wrong output, crash, or unclear error—open a bug report. Please include:</p>
-      <ul>
-        <li>Jade version (<code>jade --version</code>) and OS</li>
-        <li>Short code sample that reproduces the issue</li>
-        <li>What you expected vs what actually happened</li>
-      </ul>
+      <h2 id="submit">Submit feedback</h2>
+      <p>Include version (<code>jade --version</code>) and OS for bugs, and a short code sample if relevant.</p>
+      <div id="feedback-success" class="feedback-success hidden" aria-hidden="true" role="status">
+        Thank you. Your feedback has been recorded.
+      </div>
+      <form id="feedback-form" class="feedback-form">
+        <label for="feedback-title">Title</label>
+        <input type="text" id="feedback-title" name="feedback-title" placeholder="Short title" required>
+        <label for="feedback-type">Type</label>
+        <select id="feedback-type" name="feedback-type">
+          <option value="bug">Bug report</option>
+          <option value="feature">Feature request</option>
+          <option value="other">Other</option>
+        </select>
+        <label for="feedback-message">Message</label>
+        <textarea id="feedback-message" name="feedback-message" rows="5" placeholder="Describe the issue or idea…" required></textarea>
+        <label for="feedback-email">Email (optional)</label>
+        <input type="email" id="feedback-email" name="feedback-email" placeholder="you@example.com">
+        <button type="submit" class="btn btn-primary">Submit</button>
+      </form>
 
-      <h2 id="features">Feature requests</h2>
-      <p>Ideas for new language features, built-ins, or tooling are welcome. Describe the use case and, if you can, how you’d like the syntax or API to look. Check existing issues first to avoid duplicates.</p>
-
-      <h2 id="issues">Open an issue</h2>
-      <p><a href="https://github.com/Llunarstack/Jade-programming-lang/issues/new" class="btn btn-primary" target="_blank" rel="noopener noreferrer">New issue on GitHub →</a></p>
-      <p>For general questions or chat, use the <a href="forums.html">Forums</a> (GitHub Discussions).</p>
+      <h2 id="recent">Recent submissions</h2>
+      <div id="feedback-recent" class="feedback-recent"></div>
+      <p>For general questions or chat, use the <a href="forums.html">Forums</a>.</p>
     </article>
   </div>
 
@@ -82,5 +91,6 @@
   </footer>
   <script src="../script.js"></script>
   <script src="../i18n.js"></script>
+  <script src="../feedback.js"></script>
 </body>
 </html>

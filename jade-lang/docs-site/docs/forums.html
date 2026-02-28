@@ -52,25 +52,46 @@
       <nav class="docs-toc">
         <div class="toc-title">On this page</div>
         <a href="#community">Community</a>
-        <a href="#discussions">GitHub Discussions</a>
+        <a href="#new-topic">New topic</a>
+        <a href="#topics">Topics</a>
       </nav>
     </aside>
     <article class="docs-content">
       <h1>Forums</h1>
-      <p>Connect with other Jade users, share projects, and get help.</p>
+      <p>Connect with other Jade users, share projects, and get help. Discussions are stored on this site (in your browser).</p>
 
       <h2 id="community">Community</h2>
-      <p>Jade community discussions live on GitHub. You can ask questions, share tips, and talk about the language without opening an issue.</p>
+      <p>Ask questions, share tips, and talk about Jade. Start a topic below or click a topic to read and reply.</p>
 
-      <h2 id="discussions">GitHub Discussions</h2>
-      <p>Use GitHub Discussions for:</p>
-      <ul>
-        <li>How-to questions</li>
-        <li>Show and tell: scripts or ideas built with Jade</li>
-        <li>General chat about the language and roadmap</li>
-      </ul>
-      <p><a href="https://github.com/Llunarstack/Jade-programming-lang/discussions" class="btn btn-primary" target="_blank" rel="noopener noreferrer">Open Discussions</a></p>
-      <p>For bug reports or feature requests, use <a href="feedback.html">Feedback and suggestions</a> (GitHub Issues).</p>
+      <h2 id="new-topic">New topic</h2>
+      <form id="forum-new-topic-form" class="forum-form">
+        <label for="forum-topic-title">Title</label>
+        <input type="text" id="forum-topic-title" name="topic-title" placeholder="Topic title" required>
+        <label for="forum-topic-author">Your name</label>
+        <input type="text" id="forum-topic-author" name="topic-author" placeholder="Name or nickname">
+        <label for="forum-topic-body">Message</label>
+        <textarea id="forum-topic-body" name="topic-body" rows="4" placeholder="Your message…" required></textarea>
+        <button type="submit" class="btn btn-primary">Post topic</button>
+      </form>
+
+      <h2 id="topics">Topics</h2>
+      <div id="forum-topic-list-wrap">
+        <div id="forum-topic-list" class="forum-topic-list"></div>
+      </div>
+      <div id="forum-thread" class="forum-thread hidden">
+        <button type="button" id="forum-back-btn" class="btn btn-secondary">← Back to topics</button>
+        <h2 id="forum-thread-title" class="forum-thread-title"></h2>
+        <div id="forum-thread-body" class="forum-thread-op"></div>
+        <h3>Replies</h3>
+        <div id="forum-thread-replies" class="forum-thread-replies"></div>
+        <form id="forum-reply-form" class="forum-form">
+          <label for="forum-reply-author">Your name</label>
+          <input type="text" id="forum-reply-author" name="reply-author" placeholder="Name or nickname">
+          <label for="forum-reply-body">Reply</label>
+          <textarea id="forum-reply-body" name="reply-body" rows="3" placeholder="Your reply…" required></textarea>
+          <button type="submit" class="btn btn-primary">Post reply</button>
+        </form>
+      </div>
     </article>
   </div>
 
@@ -79,5 +100,6 @@
   </footer>
   <script src="../script.js"></script>
   <script src="../i18n.js"></script>
+  <script src="../forums.js"></script>
 </body>
 </html>
