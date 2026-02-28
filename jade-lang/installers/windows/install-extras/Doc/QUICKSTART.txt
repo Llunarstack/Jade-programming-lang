@@ -1,0 +1,27 @@
+Jade Quick Start
+================
+
+1. Open a terminal (or use "Jade 1.0.0 (64-bit)" from Start Menu).
+
+2. Run the REPL:
+     jade
+   or start Jade IDLE:
+     jade idle
+
+3. Run a file:
+     jade myfile.jdl
+   Or double-click a .jdl file in Explorer.
+
+4. Create a project:
+     mkdir myapp
+     cd myapp
+     jade jolt init
+     jade jolt add some-package
+     jade jolt install
+
+5. In your .jdl code:
+     str: msg = "Hello, Jade!"
+     out(msg)
+     import mylib
+
+See README.txt in this folder for full command reference.

@@ -1,0 +1,14 @@
+# Example snippets you can load in REPL: .load path\to\examples.jdl
+# Or copy into your project.
+
+fn | greet(str | name) > {
+  out("Hello, " + name)
+}
+
+fn | sum_list(list | xs) > {
+  int: total = 0
+  for x in xs { total = total + x }
+  total
+}
+
+# After loading: greet("Jade"); out(sum_list([1,2,3]))

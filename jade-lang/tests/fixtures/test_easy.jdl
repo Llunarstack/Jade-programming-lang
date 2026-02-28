@@ -1,0 +1,23 @@
+# Easy: sum a list of integers
+fn | sum_list ( list | xs ) > {
+  int: total = 0
+  for x in xs {
+    total = total + x
+  }
+  total
+}
+
+fn | check ( str | name, str | got, str | want ) > {
+  if got == want {
+    out(name + ": OK")
+  } else {
+    out(name + ": FAIL got \"" + got + "\" want \"" + want + "\"")
+  }
+}
+
+out("--- Easy: sum_list ---")
+check("sum-1", sum_list([1, 2, 3]) + "", "6")
+check("sum-2", sum_list([]) + "", "0")
+check("sum-3", sum_list([10]) + "", "10")
+check("sum-4", sum_list([1, 1, 1, 1]) + "", "4")
+

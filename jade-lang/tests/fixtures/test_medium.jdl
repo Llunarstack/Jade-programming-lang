@@ -1,0 +1,27 @@
+# Medium: reverse a string (build new string from chars)
+fn | reverse_str ( str | s ) > {
+  list: chars = []
+  for (i, c) in s {
+    chars = chars.append(c)
+  }
+  list: out = []
+  int: n = len(chars)
+  for i in range(0, n) {
+    out = out.append(chars[n - 1 - i])
+  }
+  join(out, "")
+}
+
+fn | check ( str | name, str | got, str | want ) > {
+  if got == want {
+    out(name + ": OK")
+  } else {
+    out(name + ": FAIL got \"" + got + "\" want \"" + want + "\"")
+  }
+}
+
+out("--- Medium: reverse_str ---")
+check("rev-1", reverse_str("hello"), "olleh")
+check("rev-2", reverse_str("a"), "a")
+check("rev-3", reverse_str(""), "")
+check("rev-4", reverse_str("ab"), "ba")

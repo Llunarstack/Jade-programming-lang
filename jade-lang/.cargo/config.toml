@@ -1,0 +1,3 @@
+﻿# Used by build-aarch64-with-vs.ps1 for Windows ARM64 cross-compile
+[target.aarch64-pc-windows-msvc]
+linker = "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/arm/link.exe"

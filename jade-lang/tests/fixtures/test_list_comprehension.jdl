@@ -1,0 +1,21 @@
+# List comprehension: [expr for var in iterable] and [expr for var in iterable if cond]
+fn | check ( str | name, str | got, str | want ) > {
+  if got == want {
+    out(name + ": OK")
+  } else {
+    out(name + ": FAIL got \"" + got + "\" want \"" + want + "\"")
+  }
+}
+
+out("--- List comprehension ---")
+list: sq = [x * x for x in [1, 2, 3, 4]]
+check("squares-len", len(sq) + "", "4")
+check("squares-0", sq[0] + "", "1")
+check("squares-3", sq[3] + "", "16")
+
+list: evens = [x for x in [1, 2, 3, 4, 5, 6] if x % 2 == 0]
+check("evens-len", len(evens) + "", "3")
+check("evens-0", evens[0] + "", "2")
+
+list: from_str = [c for c in "hi"]
+check("from-str-len", len(from_str) + "", "2")

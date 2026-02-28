@@ -1,0 +1,25 @@
+# Dict: literal, keys, values, get, has, len
+fn | check ( str | name, str | got, str | want ) > {
+  if got == want {
+    out(name + ": OK")
+  } else {
+    out(name + ": FAIL got \"" + got + "\" want \"" + want + "\"")
+  }
+}
+
+out("--- Dict ---")
+dict: d = { "a" : 1, "b" : 2, "c" : 3 }
+check("dict-len", size(d) + "", "3")
+check("dict-get-a", d["a"] + "", "1")
+check("dict-get-b", d["b"] + "", "2")
+
+list: k = keys(d)
+check("keys-len", len(k) + "", "3")
+
+list: v = values(d)
+check("values-len", len(v) + "", "3")
+
+str: has_a = has(d, "a") + ""
+str: has_z = has(d, "z") + ""
+check("has-a", has_a, "true")
+check("has-z", has_z, "false")

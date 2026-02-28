@@ -27,6 +27,9 @@ Thumbs.db
 .env.local
 
 # Generated installers and build output
-/install/output/
-/j-lang/dist/
+/install/
 dist/
+
+# Local workflow / IDE caches (not part of repo)
+.zenflow/
+.zencoder/

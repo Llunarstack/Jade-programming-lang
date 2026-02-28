@@ -1,0 +1,34 @@
+Jade Syntax Quick Reference
+==========================
+
+Variables
+  type: name = value
+  str: name = "value"
+  int: x = 32
+  list: xs = [1, 2, 3]
+  dict: d = {"a": 1, "b": 2}
+
+Output
+  out(x)
+  out("Hello")
+
+Functions
+  fn | add(a, b) > a + b
+  fn | greet(name) > { out("Hi, " + name) }
+
+Loops
+  i in 1..10 : out(i)
+  for x in list { ... }
+  while cond { ... }
+
+Conditionals
+  if x > 0 { ... } else { ... }
+
+Imports
+  import foo
+  import foo.{bar, baz}
+
+Comments
+  # single line
+
+File extension: .jdl

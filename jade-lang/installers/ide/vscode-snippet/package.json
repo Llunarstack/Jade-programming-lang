@@ -1,0 +1,39 @@
+{
+  "name": "jade-language",
+  "displayName": "Jade Language",
+  "description": "Jade language support: syntax, run from buffer (no save), debounced autosave",
+  "version": "0.2.0",
+  "main": "./extension.js",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:jade"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "jade",
+        "aliases": ["Jade", "jade"],
+        "extensions": [".jdl"],
+        "configuration": "./language-configuration.json",
+        "mimetypes": ["text/x-jdl", "application/x-jdl"]
+      }
+    ],
+    "grammars": [
+      { "language": "jade", "scopeName": "source.jade", "path": "./syntaxes/jade.tmLanguage.json" }
+    ],
+    "commands": [
+      {
+        "command": "jade.runFromBuffer",
+        "title": "Jade: Run from buffer (no save)",
+        "category": "Jade"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "jade.runFromBuffer",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "editorLangId == jade"
+      }
+    ]
+  }
+}

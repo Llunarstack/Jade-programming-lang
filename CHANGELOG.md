@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the J programming language will be documented in this file.
+All notable changes to the Jade programming language will be documented in this file.
 
 ## [Unreleased]
 

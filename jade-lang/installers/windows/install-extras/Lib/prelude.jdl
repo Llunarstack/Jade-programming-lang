@@ -1,0 +1,7 @@
+# Jade standard library placeholder
+# This folder holds standard library modules.
+# Use: import std.prelude (when registered)
+# Project packages: jade jolt add <name> then import <name>
+
+str: version = "1.0.0"
+# fn | hello() > "Hello from Jade stdlib"

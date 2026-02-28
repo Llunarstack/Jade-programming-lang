@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Documentation
-    url: https://github.com/Llunarstack/j/blob/main/j-lang/doc/README.md
-    about: Design docs and language specs
+    url: https://github.com/Llunarstack/j#readme
+    about: Jade language and repo overview

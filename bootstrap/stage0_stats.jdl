@@ -1,0 +1,22 @@
+# Stage 0 bootstrap: read a .jdl file and report simple stats (lines, pattern counts).
+# Run from repo root: jade bootstrap/stage0_stats.jdl
+# Reads bootstrap/stage0_hello.jdl by default.
+
+str: path = "bootstrap/stage0_hello.jdl"
+list: lines = read_lines(path)
+int: num_lines = len(lines)
+
+int: var_decls = 0
+int: fn_decls = 0
+for line in lines {
+  str: trimmed = trim(line)
+  if len(trimmed) > 0 {
+    if trimmed.contains("str:") or trimmed.contains("int:") or trimmed.contains("list:") or trimmed.contains("dict:") or trimmed.contains("float:") or trimmed.contains("bool:") { var_decls = var_decls + 1 }
+    if trimmed.contains("fn ") { fn_decls = fn_decls + 1 }
+  }
+}
+
+out("File: " + path)
+out("Lines: " + num_lines + "")
+out("Variable declarations (str:/int:/list:/...): " + var_decls + "")
+out("Function declarations (fn ): " + fn_decls + "")

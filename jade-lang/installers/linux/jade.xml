@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="text/x-jdl">
+    <comment>Jade source code</comment>
+    <comment xml:lang="en">Jade source code</comment>
+    <glob pattern="*.jdl"/>
+    <alias type="application/x-jdl"/>
+  </mime-type>
+</mime-info>

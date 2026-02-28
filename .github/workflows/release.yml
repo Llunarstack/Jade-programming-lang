@@ -1,0 +1,97 @@
+# Build Jade for multiple OS/arch and produce installers where possible.
+# On push of a version tag (e.g. v0.1.0), upload release artifacts.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: jade-windows-x86_64.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: jade-macos-x86_64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: jade-macos-arm64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: jade-linux-x86_64
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            artifact: jade-linux-arm64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (Linux aarch64)
+        if: matrix.os == 'ubuntu-22.04' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build (native)
+        if: matrix.target != 'aarch64-unknown-linux-gnu' || matrix.os != 'ubuntu-22.04'
+        run: cargo build --release
+        working-directory: jade-lang
+      - name: Build (cross aarch64 Linux)
+        if: matrix.os == 'ubuntu-22.04' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cross build --release --target aarch64-unknown-linux-gnu
+        working-directory: jade-lang
+
+      - name: Set binary path
+        id: bin
+        working-directory: jade-lang
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            echo "path=target/release/jade.exe" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            echo "path=target/aarch64-unknown-linux-gnu/release/jade" >> $GITHUB_OUTPUT
+          else
+            echo "path=target/release/jade" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Prepare artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item "jade-lang/${{ steps.bin.outputs.path }}" "dist/${{ matrix.artifact }}"
+        shell: pwsh
+      - name: Prepare artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist
+          cp "jade-lang/${{ steps.bin.outputs.path }}" "dist/${{ matrix.artifact }}"
+          chmod +x "dist/${{ matrix.artifact }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  # Optional: build Windows installer (Inno Setup). Uncomment if iscc is available in CI.
+  # windows-installer:
+  #   needs: build
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: jade-windows-x86_64.exe
+  #     - run: choco install innosetup -y
+  #     - run: iscc jade-lang/installers/windows/jade-setup.iss
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: jade-windows-setup
+  #         path: dist/installers/windows/*.exe

@@ -1,0 +1,13 @@
+Jade 1.0.0 (2026)
+=================
+
+First stable-style release.
+
+- Interpreter and optional JIT
+- REPL and Jade IDLE (jade idle)
+- Package manager (jolt): jade.toml, jade jolt add/install
+- .jdl file association and run
+- Windows: 64-bit, 32-bit, ARM64 installers
+- Icon embedded in jade.exe
+
+Run "jade --help" and "jade jolt --help" for usage.

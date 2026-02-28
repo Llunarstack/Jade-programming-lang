@@ -1,0 +1,15 @@
+Jade Changelog
+==============
+
+1.0.0 (2026-02-27)
+------------------
+- Initial stable-style release
+- Interpreter and optional JIT
+- REPL and Jade IDLE (jade idle)
+- Jolt package manager (jade.toml, add/install)
+- .jdl file association on Windows
+- Windows installers: 64-bit, 32-bit, ARM64
+- Icon embedded in jade.exe
+- Doc, Lib, Scripts folders in installation
+
+For detailed changes see the repository.

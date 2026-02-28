@@ -1,91 +1,129 @@
 <p align="center">
-  <strong>J</strong> — expressive language for data & algorithms
+  <img src="assets/jade.png" width="120" alt="Jade logo">
+</p>
+
+<h1 align="center">Jade</h1>
+
+<p align="center">
+  <strong>An expressive language for data and algorithms.</strong>
 </p>
 
 <p align="center">
-  <img src="J_lang_logo.ico" width="64" height="64" alt="J logo" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://github.com/Llunarstack/j/actions/workflows/release.yml"><img src="https://github.com/Llunarstack/j/actions/workflows/release.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust 1.70+"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.0-green.svg" alt="Version 1.0.0"></a>
 </p>
 
-# J Programming Language
+---
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![CI](https://github.com/Llunarstack/j/actions/workflows/ci.yml/badge.svg)](https://github.com/Llunarstack/j/actions/workflows/ci.yml)
+## What is Jade?
 
-**J** is an expressive programming language and toolchain for data-heavy and algorithmic code. This repository contains the interpreter, standard library, examples, and editor support.
+Jade is a **memory-safe**, **readable** programming language and toolchain built for data-heavy and algorithmic code. One binary: interpreter, REPL, package manager, and VS Code support.
+
+```jdl
+fn | greet ( str | name ) > {
+  out("Hello, " + name)
+}
+
+greet("Jade")
+int: total = 0
+for x in [1, 2, 3] { total = total + x }
+out("Sum: " + total)
+```
 
 ---
 
 ## Features
 
-| Area | Highlights |
-|------|------------|
-| **Language** | Typed variables, pattern matching, `cond`, lambdas, pipelines (`\|>`), classes |
-| **Data structures** | Lists, dicts, sets, graphs, deques, priority queues, matrices |
-| **Algorithms** | Built-in: `two_sum`, `prefix_sum`, `bfs`/`dfs`, `count_if`, sliding window, LIS, and more |
-| **Loops** | `for`, `sweep`, `meet`, `binary`, `while_nonzero`, `while_change` |
-| **Tooling** | CLI, REPL, module system, VS Code extension, multi-platform installers |
+| | |
+|---|---|
+| **Readable** | Pipelines (`\|>`), pattern matching, `cond`/`when`, lambdas. Typed variables and classes without boilerplate. |
+| **Algorithm-friendly** | Loops that match how you think: `sweep`, `meet`, binary-search, `while_nonzero`. Rich stdlib: graphs, deques, priority queues, matrices, `gcd`/`lcm`, `bfs`/`dfs`. |
+| **One toolchain** | Run scripts (`jade file.jdl`), REPL (`jade repl`), or structured projects with the Jolt package manager. |
+| **Editor support** | VS Code & Cursor: syntax, run-from-buffer (no save), debounced autosave. Optional .jdl file association and icon. |
+
+---
+
+## Install
+
+### Windows
+
+Download the installer from [Releases](https://github.com/Llunarstack/j/releases) or build locally:
+
+```powershell
+cd jade-lang
+cargo build --release
+.\installers\windows\build-exe.ps1
+# → dist\installers\windows\jade-1.0.0-windows-x86_64-setup.exe
+```
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/Llunarstack/j.git
+cd j/jade-lang
+cargo build --release
+./installers/linux/install.sh    # Linux
+# or
+./installers/macos/install.sh   # macOS
+```
+
+### From source (any OS)
+
+```bash
+cd jade-lang
+cargo build --release
+# Binary: target/release/jade
+# Add to PATH or: cargo install --path .
+```
+
+Full install options (portable zip, MSI, IDE setup): **[docs/INSTALL.md](docs/INSTALL.md)**.
+
+---
 
 ## Quick start
 
 ```bash
-git clone https://github.com/Llunarstack/j.git
-cd j/j-lang
-cargo build --release
-cargo run -- run examples/analytics_pipeline/main.j
+# Create a file
+echo 'out("Hi from Jade!")' > hello.jdl
+
+# Run it
+jade hello.jdl
+# → Hi from Jade!
+
+# REPL
+jade repl
 ```
 
-**REPL**
-
-```bash
-cargo run -- repl
-```
-
-**Install globally**
-
-```bash
-cargo install --path j-lang
-j run path/to/file.j
-```
+---
 
 ## Project layout
 
-```
-j/
-├── j-lang/              # Main crate (interpreter + CLI)
-│   ├── src/             # Lexer, parser, interpreter, REPL, crypto
-│   ├── stdlib/          # Standard library (.j modules)
-│   ├── doc/             # Design docs and specs
-│   ├── examples/        # Example programs (FizzBuzz, Stellar Dungeon, Analytics Pipeline)
-│   ├── tests/           # Integration tests and fixtures
-│   ├── vscode-extension/
-│   └── installers/      # Pre-built installers
-├── CONTRIBUTING.md
-├── CHANGELOG.md
-├── PROJECT_STRUCTURE.md
-└── LICENSE (MIT)
-```
+| Path | What |
+|------|------|
+| [jade-lang/](jade-lang/) | Rust crate: interpreter, compiler, REPL, Jolt |
+| [jade-lang/installers/](jade-lang/installers/) | Windows (Inno, MSI, portable), Linux, macOS, IDE extension |
+| [docs/](docs/README.md) | [INSTALL](docs/INSTALL.md) · [BOOTSTRAP](docs/BOOTSTRAP.md) · [CONTRIBUTING](docs/CONTRIBUTING.md) · [Structure](docs/PROJECT_STRUCTURE.md) |
+| [bootstrap/](bootstrap/) | Jade scripts that process Jade source (bootstrapping) |
 
-See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for a detailed map of the codebase.
+---
 
 ## Documentation
 
-- **Build & usage:** [j-lang/README.md](j-lang/README.md)
-- **Doc index:** [j-lang/doc/README.md](j-lang/doc/README.md)
-- **Advanced features:** [j-lang/doc/ADVANCED_LOOPS.md](j-lang/doc/ADVANCED_LOOPS.md), [j-lang/doc/BUILTIN_ALGORITHMS.md](j-lang/doc/BUILTIN_ALGORITHMS.md), [j-lang/doc/ADVANCED_CLASS_TYPES.md](j-lang/doc/ADVANCED_CLASS_TYPES.md)
+- **Install & run:** [docs/INSTALL.md](docs/INSTALL.md)
+- **Bootstrapping:** [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md)
+- **Contributing:** [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) · [Code of Conduct](docs/CODE_OF_CONDUCT.md)
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
-## Status
-
-**Version:** 0.1.0 (experimental). APIs and language details may change. See [CHANGELOG.md](CHANGELOG.md).
+---
 
 ## Contributing
 
-We welcome contributions. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Use [GitHub Issues](https://github.com/Llunarstack/j/issues) for bugs and feature requests.
+Contributions are welcome. Open an [issue](https://github.com/Llunarstack/j/issues) or see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+
+---
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
-
-## Trademark
-
-The name **J** and the J logo are used for this project. If you want to use these for another project, please open an issue to discuss.
+MIT — see [LICENSE](LICENSE). The name and logo **Jade** are used for this project; to use them elsewhere, please [open an issue](https://github.com/Llunarstack/j/issues) to discuss.

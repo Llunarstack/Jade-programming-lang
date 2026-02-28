@@ -1,0 +1,31 @@
+# Hard: remove minimum parentheses to make valid (from remove_extra_parens.jdl)
+fn | remove_extra_parens ( str | s ) > {
+  list: stk = []
+  list: drop = []
+  for (i, c) in s {
+    if c == "(" {
+      stk = stk.append(i)
+    } else if c == ")" {
+      if len(stk) > 0 {
+        stk = stk.slice(0, len(stk) - 1)
+      } else {
+        drop = drop.append(i)
+      }
+    }
+  }
+  drop = append(drop, stk)
+  join([s[i] for i in range(0, len(s)) if not drop.contains(i)], "")
+}
+
+fn | check ( str | name, str | got, str | want ) > {
+  if got == want {
+    out(name + ": OK")
+  } else {
+    out(name + ": FAIL got \"" + got + "\" want \"" + want + "\"")
+  }
+}
+
+out("--- Hard: remove_extra_parens ---")
+check("parens-1", remove_extra_parens("lee(t(c)o)de)"), "lee(t(c)o)de")
+check("parens-2", remove_extra_parens("a)b(c)d"), "ab(c)d")
+check("parens-3", remove_extra_parens("))(("), "")

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Jade",
+  "scopeName": "source.jade",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#builtins" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.jade",
+          "match": "#.*$"
+        },
+        {
+          "name": "comment.line.double-slash.jade",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.jade",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.jade",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "include": "#string_escapes" }]
+        },
+        {
+          "name": "string.quoted.single.jade",
+          "begin": "'",
+          "end": "'",
+          "patterns": [{ "include": "#string_escapes" }]
+        }
+      ]
+    },
+    "string_escapes": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.jade",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.jade",
+          "match": "\\b[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.jade",
+          "match": "\\b(if|else|for|in|while|loop|break|continue|return|match|case|when|unless|cond|either|switch|try|catch|finally|defer|yield|async|await)\\b"
+        },
+        {
+          "name": "keyword.declaration.jade",
+          "match": "\\b(fn|class|enum|trait|static|let|mut|import|use|mod|type|pub|priv)\\b"
+        },
+        {
+          "name": "keyword.other.jade",
+          "match": "\\b(secure|singleton|actor|data|resource|and|or|not|true|false|None)\\b"
+        },
+        {
+          "name": "storage.type.jade",
+          "match": "\\b(int|str|float|bool|list|dict|vec|matrix|set|counter|span|chunk|ring)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.jade",
+          "match": "\\b(out|len|sum|min|max|range|map|filter|reduce|zip|sort|reverse|push|pop|append|keys|contains|split|join|replace|trim|int|float|str|type|read|write|input)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.assignment.jade",
+          "match": "=>|->|<-|=|\\|>"
+        },
+        {
+          "name": "keyword.operator.comparison.jade",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.jade",
+          "match": "\\+|-|\\*|/|%|\\*\\*"
+        }
+      ]
+    }
+  }
+}

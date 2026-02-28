@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?ifndef ShortcutSuffix ?>
+<?define ShortcutSuffix = "(64-bit)" ?>
+<?endif?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Jade" Language="1033" Version="1.0.0" Manufacturer="Jade Language"
+           UpgradeCode="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" InstallPrivileges="elevated" />
+    <Condition Message="This installer is for 64-bit Windows.">VersionNT64</Condition>
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Jade is already installed." />
+    <Media Id="1" Cabinet="jade.cab" EmbedCab="yes" />
+    <UIRef Id="WixUI_InstallDir" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="JadeStartMenu" Name="Jade 1.0.0" />
+      </Directory>
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="Jade 1.0.0">
+          <Directory Id="JadeDoc" Name="Doc" />
+          <Directory Id="JadeLib" Name="Lib" />
+          <Directory Id="JadeScripts" Name="Scripts" />
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="JadeFeature" Title="Jade" Level="1">
+      <ComponentRef Id="JadeExe" />
+      <ComponentRef Id="JadeIco" />
+      <ComponentRef Id="JadeProgId" />
+      <ComponentRef Id="JadePath" />
+      <ComponentRef Id="JadeStartMenuShortcut" />
+      <ComponentRef Id="JadeExtras" />
+      <ComponentRef Id="JadeDocFiles" />
+      <ComponentRef Id="JadeLibFiles" />
+      <ComponentRef Id="JadeScriptsFiles" />
+    </Feature>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="JadeExe" Guid="B1C2D3E4-F5A6-7890-BCDE-F12345678901">
+        <File Id="JadeExe" Source="$(var.JadeExePath)" KeyPath="yes" />
+      </Component>
+      <Component Id="JadeIco" Guid="C2D3E4F5-A6B7-8901-CDEF-123456789012">
+        <File Id="JadeIco" Source=".\icon\jade.ico" KeyPath="yes" />
+      </Component>
+      <Component Id="JadePath" Guid="F5A6B7C8-D901-2345-6789-0ABCDEF01234">
+        <CreateFolder />
+        <Environment Id="JadePathEnv" Name="Path" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
+      </Component>
+      <Component Id="JadeProgId" Guid="D3E4F5A6-B7C8-9012-DEF0-234567890123">
+        <RegistryKey Root="HKCR" Key=".jdl">
+          <RegistryValue Type="string" Value="Jade.SourceFile" KeyPath="yes" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="Jade.SourceFile">
+          <RegistryValue Type="string" Value="Jade source file" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="Jade.SourceFile\DefaultIcon">
+          <RegistryValue Type="string" Value="[INSTALLFOLDER]jade.ico" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="Jade.SourceFile\shell\open\command">
+          <RegistryValue Type="string" Value="[INSTALLFOLDER]jade.exe &quot;%1&quot;" />
+        </RegistryKey>
+      </Component>
+      <Component Id="JadeExtras" Guid="A5B6C7D8-E9F0-1234-5678-90ABCDEF0123">
+        <File Id="JadeLicense" Source="install-extras\LICENSE.txt" KeyPath="yes" />
+        <File Id="JadeNews" Source="install-extras\NEWS.txt" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="JadeDoc">
+      <Component Id="JadeDocFiles" Guid="B6C7D8E9-F0A1-2345-6789-0ABCDEF01234">
+        <File Id="JadeDocReadme" Source="install-extras\Doc\README.txt" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="JadeLib">
+      <Component Id="JadeLibFiles" Guid="C7D8E9F0-A123-4567-89AB-CDEF01234567">
+        <File Id="JadeLibReadme" Source="install-extras\Lib\README.txt" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="JadeScripts">
+      <Component Id="JadeScriptsFiles" Guid="D8E9F0A1-B234-5678-9ABC-DEF012345678">
+        <File Id="JadeScriptsReadme" Source="install-extras\Scripts\README.txt" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="JadeStartMenu">
+      <Component Id="JadeStartMenuShortcut" Guid="E4F5A6B7-C8D9-0123-EF01-234567890134">
+        <Shortcut Id="JadeShortcut" Name="Jade" Description="Jade REPL"
+                  Target="[INSTALLFOLDER]jade.exe" Arguments="repl" WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="JadeIdleShortcut" Name="Jade IDLE" Description="Jade IDLE - interactive shell"
+                  Target="[INSTALLFOLDER]jade.exe" Arguments="idle" WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveJadeStartMenu" Directory="JadeStartMenu" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Jade Language\Jade 1.0.0" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Product>
+</Wix>

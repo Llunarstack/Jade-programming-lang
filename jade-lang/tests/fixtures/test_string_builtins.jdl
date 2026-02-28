@@ -1,0 +1,31 @@
+# String builtins: split, join, upper, lower, trim, substring
+fn | check ( str | name, str | got, str | want ) > {
+  if got == want {
+    out(name + ": OK")
+  } else {
+    out(name + ": FAIL got \"" + got + "\" want \"" + want + "\"")
+  }
+}
+
+out("--- String builtins ---")
+str: s = "a,b,c"
+list: parts = split(s, ",")
+check("split-len", len(parts) + "", "3")
+check("split-0", parts[0], "a")
+check("split-2", parts[2], "c")
+
+list: arr = ["x", "y", "z"]
+str: j = join(arr, "-")
+check("join", j, "x-y-z")
+
+str: up = upper("hello")
+check("upper", up, "HELLO")
+
+str: lo = lower("WORLD")
+check("lower", lo, "world")
+
+str: t = trim("  hi  ")
+check("trim", t, "hi")
+
+str: sub = substring("hello", 1, 4)
+check("substring", sub, "ell")
